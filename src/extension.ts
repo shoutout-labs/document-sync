@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { GoogleAIFileManager } from '@google/generative-ai/server';
 import * as fs from 'fs';
 import * as path from 'path';
+import { GeminiService } from './geminiService';
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('Congratulations, your extension "gemini-file-sync" is now active!');
@@ -227,9 +228,6 @@ export async function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.changeWatchLocation', async () => {
         await SettingsManager.updateSetting('watchLocation', undefined); // Clear to force prompt
         await getWatchLocation();
-        // Re-initialize watcher if needed (simplified: reload window hint or just update var)
-        // For now, let's just notify user to reload or we can try to update the watcher dynamically
-        // Dynamic update is better but let's stick to simple for now.
         vscode.window.showInformationMessage("Watch location updated. Reload window to apply watcher changes fully.");
         treeDataProvider.refresh();
     }));
@@ -273,13 +271,14 @@ export async function activate(context: vscode.ExtensionContext) {
             folderUri = folderResult[0];
         }
 
-        // 3. Initialize File Manager
+        // 3. Initialize Gemini Service
         try {
-            const fileManager = new GoogleAIFileManager(apiKey);
+            const geminiService = new GeminiService(apiKey);
             const currentProjectName = settings.projectName || 'Project';
 
-            vscode.window.showInformationMessage(`Syncing files from ${folderUri.fsPath}...`);
+            vscode.window.showInformationMessage(`Syncing files from ${folderUri.fsPath} to File Store '${currentProjectName}'...`);
             outputChannel.appendLine(`Selected folder: ${folderUri.fsPath}`);
+            outputChannel.appendLine(`Target File Store: ${currentProjectName}`);
 
             const files = await findFiles(folderUri);
             if (files.length === 0) {
@@ -288,6 +287,11 @@ export async function activate(context: vscode.ExtensionContext) {
                 outputChannel.appendLine(msg);
                 return;
             }
+
+            // Get or Create File Store
+            outputChannel.appendLine(`Ensuring File Store '${currentProjectName}' exists...`);
+            const storeName = await geminiService.getOrCreateFileSearchStore(currentProjectName);
+            outputChannel.appendLine(`Using File Store: ${storeName}`);
 
             const totalFiles = files.length;
             let uploadedCount = 0;
@@ -305,21 +309,17 @@ export async function activate(context: vscode.ExtensionContext) {
                     }
 
                     const relativePath = vscode.workspace.asRelativePath(file);
-                    // Construct display name with Project Name prefix
-                    const displayName = `${currentProjectName}/${relativePath}`;
+                    // Use relative path as display name in the store
+                    const displayName = relativePath;
 
                     progress.report({ message: `Uploading ${relativePath}...`, increment: 100 / totalFiles });
-                    outputChannel.appendLine(`Uploading ${relativePath} as ${displayName}...`);
+                    outputChannel.appendLine(`Uploading ${relativePath}...`);
 
                     try {
                         const mimeType = getMimeType(file.fsPath);
                         if (mimeType) {
-                            const uploadResult = await fileManager.uploadFile(file.fsPath, {
-                                mimeType: mimeType,
-                                displayName: displayName
-                            });
-                            const msg = `Uploaded ${displayName} -> ${uploadResult.file.uri}`;
-                            console.log(msg);
+                            await geminiService.uploadFile(storeName, file.fsPath, mimeType, displayName);
+                            const msg = `Uploaded ${displayName}`;
                             outputChannel.appendLine(msg);
                             uploadedCount++;
                         }
@@ -331,12 +331,12 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
             });
 
-            const summary = `Sync complete. Uploaded ${uploadedCount}/${totalFiles} files.`;
+            const summary = `Sync complete. Uploaded ${uploadedCount}/${totalFiles} files to Store '${currentProjectName}'.`;
             vscode.window.showInformationMessage(summary);
             outputChannel.appendLine(summary);
 
         } catch (error) {
-            const errorMsg = `Failed to initialize Gemini File Manager: ${error}`;
+            const errorMsg = `Failed to initialize Gemini Service: ${error}`;
             vscode.window.showErrorMessage(errorMsg);
             outputChannel.appendLine(errorMsg);
         }
