@@ -1,0 +1,73 @@
+{
+  "name": "gemini-file-sync",
+  "displayName": "Gemini File Sync",
+  "description": "Sync files to Gemini File Search API. Compatible with VS Code and Cursor.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "gemini",
+    "file search",
+    "sync",
+    "cursor",
+    "ai"
+  ],
+  "activationEvents": [
+    "onCommand:geminiFileSearch.sync"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gemini-sync-container",
+          "title": "Gemini Sync",
+          "icon": "resources/gemini-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "gemini-sync-container": [
+        {
+          "id": "gemini-sync-view",
+          "name": "Actions"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "geminiFileSearch.sync",
+        "title": "Gemini File Search: Sync Files"
+      },
+      {
+        "command": "geminiFileSearch.login",
+        "title": "Login to Gemini"
+      },
+      {
+        "command": "geminiFileSearch.changeProject",
+        "title": "Change Project Name"
+      },
+      {
+        "command": "geminiFileSearch.changeWatchLocation",
+        "title": "Change Watch Location"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "18.x",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1"
+  }
+}

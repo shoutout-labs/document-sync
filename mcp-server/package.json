@@ -1,0 +1,21 @@
+{
+    "name": "gemini-file-search-mcp",
+    "version": "0.1.0",
+    "description": "MCP Server for Gemini File Search",
+    "type": "module",
+    "main": "build/index.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node build/index.js"
+    },
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^0.6.0",
+        "@google/generative-ai": "^0.21.0",
+        "dotenv": "^16.4.5",
+        "zod": "^3.23.8"
+    },
+    "devDependencies": {
+        "@types/node": "^20.12.12",
+        "typescript": "^5.4.5"
+    }
+}
