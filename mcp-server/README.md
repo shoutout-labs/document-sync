@@ -12,25 +12,28 @@ It automatically detects your project configuration from the `document-sync.json
 
 ## Installation
 
-Navigate to this directory and install dependencies:
+You can install this server directly from npm:
 
 ```bash
-cd mcp-server
-npm install
-npm run build
+npm install -g document-sync-mcp
+```
+
+Or run it directly with `npx`:
+
+```bash
+npx document-sync-mcp
 ```
 
 ## Running the Server
 
-You can run the server manually to test it, but typically you will configure it within an MCP client (like Claude Desktop or Cursor).
+### Environment Variables
+- `GEMINI_API_KEY`: **Required**. Your Google Gemini API Key.
+- `PROJECT_PATH`: **Optional**. Absolute path to your project root. Use this if the server cannot find `document-sync.json` automatically (e.g., when running from a different directory).
 
-### Environment Variable
-The server requires the `GEMINI_API_KEY` environment variable to be set.
-
-### Manual Test
+### Manual Run
 ```bash
 export GEMINI_API_KEY="your_api_key_here"
-node build/index.js
+npx document-sync-mcp
 ```
 
 ## Adding to Claude Desktop
@@ -41,9 +44,10 @@ To use this server with Claude Desktop, add the following to your `claude_deskto
 {
   "mcpServers": {
     "gemini-file-search": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "/absolute/path/to/your/project/mcp-server/build/index.js"
+        "-y",
+        "document-sync-mcp"
       ],
       "env": {
         "GEMINI_API_KEY": "your_api_key_here"
@@ -52,7 +56,6 @@ To use this server with Claude Desktop, add the following to your `claude_deskto
   }
 }
 ```
-*Note: Replace `/absolute/path/to/your/project/...` with the actual full path to the `build/index.js` file.*
 
 ## Adding to Cursor
 
@@ -63,7 +66,7 @@ To use this server with Claude Desktop, add the following to your `claude_deskto
 5.  **Type**: `command`.
 6.  **Command**:
     ```bash
-    node /absolute/path/to/your/project/mcp-server/build/index.js
+    npx -y document-sync-mcp
     ```
 7.  **Environment Variables**:
     - Key: `GEMINI_API_KEY`
@@ -71,4 +74,6 @@ To use this server with Claude Desktop, add the following to your `claude_deskto
 
 ## Available Tools
 
-- **`ask_project`**: Ask a question about the current project. The server will find relevant files uploaded to Gemini (matching your project name) and use them to answer your query.
+- **`ask_project(query: string, projectName?: string)`**: Ask a question about the current project.
+    - `query`: The question to ask.
+    - `projectName`: (Optional) The name of the project. If provided, the server uses this name to find files. If not provided, it attempts to find `document-sync.json` in the current or parent directories.

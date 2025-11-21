@@ -1,9 +1,28 @@
 {
-    "name": "gemini-file-search-mcp",
-    "version": "0.1.0",
+    "name": "document-sync-mcp",
+    "version": "0.1.6",
     "description": "MCP Server for Gemini File Search",
     "type": "module",
     "main": "build/index.js",
+    "bin": {
+        "document-sync-mcp": "./build/index.js"
+    },
+    "files": [
+        "build",
+        "README.md"
+    ],
+    "keywords": [
+        "mcp",
+        "gemini",
+        "file-search",
+        "ai",
+        "context",
+        "server"
+    ],
+    "license": "MIT",
+    "publishConfig": {
+        "access": "public"
+    },
     "scripts": {
         "build": "tsc",
         "start": "node build/index.js"

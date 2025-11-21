@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -29,18 +30,43 @@ interface GeminiSettings {
 }
 
 function getProjectName(): string | undefined {
-    // Look for document-sync.json in the current working directory
-    const settingsPath = path.join(process.cwd(), "document-sync.json");
-    if (fs.existsSync(settingsPath)) {
-        try {
-            const content = fs.readFileSync(settingsPath, "utf-8");
-            const settings = JSON.parse(content) as GeminiSettings;
-            return settings.projectName;
-        } catch (error) {
-            console.error("Failed to parse document-sync.json:", error);
+    let searchDir = process.cwd();
+
+    // If PROJECT_PATH env var is set, start searching from there (or check it directly)
+    if (process.env.PROJECT_PATH) {
+        const envPath = path.join(process.env.PROJECT_PATH, "document-sync.json");
+        if (fs.existsSync(envPath)) {
+            return parseSettings(envPath);
         }
+        searchDir = process.env.PROJECT_PATH;
     }
+
+    // Recursive search up
+    const root = path.parse(searchDir).root;
+    while (true) {
+        const settingsPath = path.join(searchDir, "document-sync.json");
+        if (fs.existsSync(settingsPath)) {
+            return parseSettings(settingsPath);
+        }
+
+        if (searchDir === root) {
+            break;
+        }
+        searchDir = path.dirname(searchDir);
+    }
+
     return undefined;
+}
+
+function parseSettings(filePath: string): string | undefined {
+    try {
+        const content = fs.readFileSync(filePath, "utf-8");
+        const settings = JSON.parse(content) as GeminiSettings;
+        return settings.projectName;
+    } catch (error) {
+        console.error(`Failed to parse ${filePath}:`, error);
+        return undefined;
+    }
 }
 
 // --- Server Setup ---
@@ -63,13 +89,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             {
                 name: "ask_project",
                 description:
-                    "Ask a question about the current project. It uses Gemini File Search to find relevant files uploaded for this project.",
+                    "Ask a question about the current project. It uses Gemini File Search to find relevant files uploaded for this project. You should provide the 'projectName' if you know it (e.g. from document-sync.json), otherwise the server will try to auto-detect it.",
                 inputSchema: {
                     type: "object",
                     properties: {
                         query: {
                             type: "string",
                             description: "The question or query to ask about the project.",
+                        },
+                        projectName: {
+                            type: "string",
+                            description: "The name of the project to search files for. If not provided, the server attempts to find it in document-sync.json.",
                         },
                     },
                     required: ["query"],
@@ -82,14 +112,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "ask_project") {
         const query = String(request.params.arguments?.query);
-        const projectName = getProjectName();
+        let projectName = request.params.arguments?.projectName as string | undefined;
+
+        if (!projectName) {
+            projectName = getProjectName();
+        }
 
         if (!projectName) {
             return {
                 content: [
                     {
                         type: "text",
-                        text: "Error: Could not find 'projectName' in document-sync.json in the current directory. Please ensure the file exists and has a project name set.",
+                        text: "Error: Could not determine 'projectName'. Please provide it as an argument, or ensure 'document-sync.json' exists in the project root.",
                     },
                 ],
                 isError: true,
@@ -121,7 +155,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
             // 2. Generate Content using the files
             // We will pass the file URIs to the model.
-            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+            const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
             const fileParts = projectFiles.map((file) => ({
                 fileData: {
@@ -130,10 +164,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 },
             }));
 
-            const result = await model.generateContent([
-                ...fileParts,
-                { text: `Answer the following question based on the provided project files: ${query}` },
-            ]);
+            const generateWithRetry = async (retries = 3, delay = 1000) => {
+                try {
+                    return await model.generateContent([
+                        ...fileParts,
+                        { text: `Answer the following question based on the provided project files: ${query}` },
+                    ]);
+                } catch (error: any) {
+                    if (retries > 0 && (error.message.includes("429") || error.status === 429)) {
+                        console.log(`Rate limited. Retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        return generateWithRetry(retries - 1, delay * 2);
+                    }
+                    throw error;
+                }
+            };
+
+            const result = await generateWithRetry();
 
             const responseText = result.response.text();
 
