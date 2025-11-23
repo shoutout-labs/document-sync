@@ -3,3 +3,4 @@ mcp-server/build/
 *.env
 out/
 mcp-server/**.js */
+.playwright-mcp/
