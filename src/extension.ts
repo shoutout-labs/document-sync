@@ -205,7 +205,11 @@ export async function activate(context: vscode.ExtensionContext) {
             watchItem.command = { command: 'geminiFileSearch.changeWatchLocation', title: "Change Watch Location" };
             watchItem.iconPath = new vscode.ThemeIcon('folder');
 
-            return [syncItem, projectItem, watchItem];
+            const updateApiKeyItem = new vscode.TreeItem("Update API Key", vscode.TreeItemCollapsibleState.None);
+            updateApiKeyItem.command = { command: 'geminiFileSearch.updateApiKey', title: "Update API Key" };
+            updateApiKeyItem.iconPath = new vscode.ThemeIcon('key');
+
+            return [syncItem, projectItem, watchItem, updateApiKeyItem];
         }
     }
 
@@ -230,6 +234,19 @@ export async function activate(context: vscode.ExtensionContext) {
         await getWatchLocation();
         vscode.window.showInformationMessage("Watch location updated. Reload window to apply watcher changes fully.");
         treeDataProvider.refresh();
+    }));
+
+    context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.updateApiKey', async () => {
+        const newApiKey = await vscode.window.showInputBox({
+            prompt: 'Enter your new Gemini API Key',
+            ignoreFocusOut: true,
+            password: true
+        });
+        if (newApiKey) {
+            await context.secrets.store('geminiApiKey', newApiKey);
+            vscode.window.showInformationMessage('API Key updated successfully.');
+            treeDataProvider.refresh();
+        }
     }));
 
     let disposable = vscode.commands.registerCommand('geminiFileSearch.sync', async () => {
