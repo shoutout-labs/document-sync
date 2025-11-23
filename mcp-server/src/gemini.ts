@@ -1,5 +1,4 @@
-import { GoogleAIFileManager } from "@google/generative-ai/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
@@ -12,8 +11,8 @@ if (!API_KEY) {
     process.exit(1);
 }
 
-const fileManager = new GoogleAIFileManager(API_KEY);
-const genAI = new GoogleGenerativeAI(API_KEY);
+// Initialize GoogleGenAI client
+const ai = new GoogleGenAI({ apiKey: API_KEY });
 
 // --- Settings Helper ---
 interface GeminiSettings {
@@ -63,21 +62,13 @@ function parseSettings(filePath: string): string | undefined {
 
 export async function listProjects(): Promise<string[]> {
     try {
-        const filesResponse = await fileManager.listFiles();
-        console.log("filesResponse:", JSON.stringify(filesResponse, null, 2));
+        const listResult = await ai.fileSearchStores.list();
         const projects = new Set<string>();
 
-        if (!filesResponse.files) {
-            console.log("filesResponse.files is undefined");
-            return [];
-        }
-
-        for (const file of filesResponse.files) {
-            if (file.displayName) {
-                const parts = file.displayName.split('/');
-                if (parts.length > 1) {
-                    projects.add(parts[0]);
-                }
+        // Iterate over the Pager
+        for await (const store of listResult) {
+            if (store.displayName) {
+                projects.add(store.displayName);
             }
         }
 
@@ -98,46 +89,39 @@ export async function askProject(query: string, projectName?: string): Promise<s
     }
 
     try {
-        // 1. List files to find those belonging to the project
-        const filesResponse = await fileManager.listFiles();
-        const projectFiles = filesResponse.files.filter((f) =>
-            f.displayName && f.displayName.startsWith(projectName + "/")
-        );
+        // 1. Find the File Search Store by display name
+        const listResult = await ai.fileSearchStores.list();
+        let storeName: string | undefined;
 
-        if (projectFiles.length === 0) {
-            return `No files found for project '${projectName}'. Please ensure you have synced your files using the VS Code extension.`;
+        for await (const store of listResult) {
+            if (store.displayName === projectName) {
+                storeName = store.name;
+                break;
+            }
         }
 
-        // 2. Generate Content using the files
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        if (!storeName) {
+            return `No File Store found for project '${projectName}'. Please ensure you have synced your files using the VS Code extension.`;
+        }
 
-        const fileParts = projectFiles.map((file) => ({
-            fileData: {
-                mimeType: file.mimeType,
-                fileUri: file.uri,
-            },
-        }));
-
-        const generateWithRetry = async (retries = 3, delay = 1000): Promise<any> => {
-            try {
-                return await model.generateContent([
-                    ...fileParts,
-                    { text: `Answer the following question based on the provided project files: ${query}` },
-                ]);
-            } catch (error: any) {
-                if (retries > 0 && (error.message.includes("429") || error.status === 429)) {
-                    console.log(`Rate limited. Retrying in ${delay}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    return generateWithRetry(retries - 1, delay * 2);
-                }
-                throw error;
+        // 2. Generate Content using the File Store
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: query,
+            config: {
+                tools: [
+                    {
+                        fileSearch: {
+                            fileSearchStoreNames: [storeName]
+                        }
+                    }
+                ]
             }
-        };
+        });
 
-        const result = await generateWithRetry();
-        return result.response.text();
+        return response.text || "No response generated.";
 
     } catch (error: any) {
-        throw new Error(`Error querying Gemini: ${error.message}`);
+        throw new Error(`Error querying Gemini: ${error.message || error}`);
     }
 }
