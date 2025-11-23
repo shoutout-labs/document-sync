@@ -1,5 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import * as vscode from 'vscode';
 
 export class GeminiService {
     private ai: any; // Using any because @google/genai types might be tricky or not fully exposed yet

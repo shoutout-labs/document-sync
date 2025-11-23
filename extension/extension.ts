@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import { GoogleAIFileManager } from '@google/generative-ai/server';
 import * as fs from 'fs';
 import * as path from 'path';
 import { GeminiService } from './geminiService';
