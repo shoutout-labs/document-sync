@@ -29,6 +29,7 @@ export async function activate(context: vscode.ExtensionContext) {
     interface GeminiSettings {
         projectName?: string;
         watchLocation?: string;
+        syncEnabled?: boolean;
     }
 
     class SettingsManager {
@@ -53,7 +54,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        static async updateSetting(key: keyof GeminiSettings, value: string | undefined): Promise<void> {
+        static async updateSetting(key: keyof GeminiSettings, value: string | boolean | undefined): Promise<void> {
             const settingsPath = this.getSettingsPath();
             if (!settingsPath) {
                 return;
@@ -63,11 +64,13 @@ export async function activate(context: vscode.ExtensionContext) {
             if (value === undefined) {
                 delete settings[key];
             } else {
-                settings[key] = value;
+                settings[key] = value as any;
             }
 
             try {
-                await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+                await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+                // Small delay to ensure file system has updated
+                await new Promise(resolve => setTimeout(resolve, 50));
             } catch (error) {
                 vscode.window.showErrorMessage(`Failed to save settings to document-sync.json: ${error}`);
             }
@@ -317,6 +320,19 @@ export async function activate(context: vscode.ExtensionContext) {
         await context.workspaceState.update(key, obj);
     };
 
+    // --- Helper to check if sync is enabled ---
+    const isSyncEnabled = async (): Promise<boolean> => {
+        try {
+            const settings = await SettingsManager.loadSettings();
+            // Default to true if not set
+            return settings.syncEnabled !== false;
+        } catch (error) {
+            // If there's an error reading settings, default to enabled
+            console.warn('Failed to check sync enabled setting:', error);
+            return true;
+        }
+    };
+
     // --- File Watcher ---
     let watcher: vscode.FileSystemWatcher | undefined;
     if (watchUri) {
@@ -332,6 +348,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
             // Ignore the settings file itself to prevent loops if we were watching root
             if (uri.fsPath.endsWith('document-sync.json')) {
+                return;
+            }
+
+            // Check if sync is enabled (must be checked first)
+            if (!(await isSyncEnabled())) {
                 return;
             }
 
@@ -356,6 +377,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
             // Ignore the settings file itself
             if (uri.fsPath.endsWith('document-sync.json')) {
+                return;
+            }
+
+            // Check if sync is enabled (must be checked first)
+            if (!(await isSyncEnabled())) {
                 return;
             }
 
@@ -416,6 +442,21 @@ export async function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(watcher.onDidDelete(onFileDelete));
     }
 
+    // Watch for changes to document-sync.json to detect syncEnabled changes
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        const settingsPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'document-sync.json');
+        const settingsWatcher = vscode.workspace.createFileSystemWatcher(settingsPath);
+        
+        settingsWatcher.onDidChange(async () => {
+            // When settings file changes, check syncEnabled and log status
+            const enabled = await isSyncEnabled();
+            outputChannel.appendLine(`Sync ${enabled ? 'enabled' : 'disabled'} (detected from document-sync.json change)`);
+            treeDataProvider.refresh(); // Refresh tree view to update toggle button
+        });
+        
+        context.subscriptions.push(settingsWatcher);
+    }
+
 
     // --- Tree Data Provider ---
     class GeminiTreeDataProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -459,7 +500,17 @@ export async function activate(context: vscode.ExtensionContext) {
             updateApiKeyItem.command = { command: 'geminiFileSearch.updateApiKey', title: "Update API Key" };
             updateApiKeyItem.iconPath = new vscode.ThemeIcon('key');
 
-            return [syncItem, projectItem, watchItem, updateApiKeyItem];
+            // Add toggle sync item
+            const settings = await SettingsManager.loadSettings();
+            const syncEnabled = settings.syncEnabled !== false; // Default to true
+            const toggleSyncItem = new vscode.TreeItem(
+                syncEnabled ? "Disable Sync" : "Enable Sync",
+                vscode.TreeItemCollapsibleState.None
+            );
+            toggleSyncItem.command = { command: 'geminiFileSearch.toggleSync', title: syncEnabled ? "Disable Sync" : "Enable Sync" };
+            toggleSyncItem.iconPath = new vscode.ThemeIcon(syncEnabled ? 'circle-slash' : 'check');
+
+            return [syncItem, projectItem, watchItem, updateApiKeyItem, toggleSyncItem];
         }
     }
 
@@ -481,9 +532,23 @@ export async function activate(context: vscode.ExtensionContext) {
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.changeWatchLocation', async () => {
-        await SettingsManager.updateSetting('watchLocation', undefined); // Clear to force prompt
-        await getWatchLocation();
-        vscode.window.showInformationMessage("Watch location updated. Reload window to apply watcher changes fully.");
+        // Save current watch location to restore if user cancels
+        const currentSettings = await SettingsManager.loadSettings();
+        const oldWatchLocation = currentSettings.watchLocation;
+        
+        // Temporarily clear to force getWatchLocation() to prompt
+        await SettingsManager.updateSetting('watchLocation', undefined);
+        
+        const watchUri = await getWatchLocation();
+        if (watchUri) {
+            // User selected a new location - it's already saved by getWatchLocation()
+            vscode.window.showInformationMessage("Watch location updated. Reload window to apply watcher changes fully.");
+        } else {
+            // User cancelled - restore the old location
+            if (oldWatchLocation) {
+                await SettingsManager.updateSetting('watchLocation', oldWatchLocation);
+            }
+        }
         treeDataProvider.refresh();
         // checkAndPromptSync is already called in getWatchLocation
     }));
@@ -503,7 +568,29 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     }));
 
+    context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.toggleSync', async () => {
+        const settings = await SettingsManager.loadSettings();
+        const currentSyncEnabled = settings.syncEnabled !== false; // Default to true
+        const newSyncEnabled = !currentSyncEnabled;
+        
+        await SettingsManager.updateSetting('syncEnabled', newSyncEnabled);
+        
+        const message = newSyncEnabled 
+            ? 'Sync enabled for this project.' 
+            : 'Sync disabled for this project. File watcher will ignore changes.';
+        vscode.window.showInformationMessage(message);
+        outputChannel.appendLine(`Sync ${newSyncEnabled ? 'enabled' : 'disabled'} for this project.`);
+        treeDataProvider.refresh();
+    }));
+
     let disposable = vscode.commands.registerCommand('geminiFileSearch.sync', async () => {
+        // Check if sync is enabled
+        const settings = await SettingsManager.loadSettings();
+        if (settings.syncEnabled === false) {
+            vscode.window.showWarningMessage('Sync is disabled for this project. Enable it using "Toggle Sync" command or set syncEnabled to true in document-sync.json.');
+            return;
+        }
+
         outputChannel.show();
         outputChannel.appendLine('Starting sync process...');
 
@@ -521,7 +608,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // 2. Determine Folder to Sync (Use Watch Location if available, else prompt)
         let folderUri: vscode.Uri | undefined;
-        const settings = await SettingsManager.loadSettings();
         const storedWatchPath = settings.watchLocation;
 
         if (storedWatchPath) {
