@@ -4,6 +4,35 @@ This is a Model Context Protocol (MCP) server that allows AI agents to query you
 
 It automatically detects your project configuration from the `document-sync.json` file created by the Gemini File Sync VS Code extension.
 
+## Related Extensions
+
+This MCP server works seamlessly with the **Document Sync** extension for VS Code and Cursor, which automatically syncs your project files to Google's Gemini File Search API.
+
+### VS Code Extension
+
+Install the [Document Sync extension](https://marketplace.visualstudio.com/items?itemName=shoutoutlabs.document-sync) from the VS Code Marketplace to:
+
+- Automatically sync files to Gemini File Search when you save changes
+- Organize files by project name for better management
+- Selectively watch and sync specific directories
+- Securely store your Gemini API key
+
+### Cursor Extension
+
+The same extension is also available for Cursor. Install it from:
+
+- [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=shoutoutlabs.document-sync) (works in Cursor)
+- [Open VSX](https://open-vsx.org/extension/shoutoutlabs/document-sync) (open-source alternative)
+
+### How They Work Together
+
+1. **Install the Extension**: Install Document Sync in VS Code or Cursor
+2. **Sync Your Files**: Use the extension to sync your project files to Gemini File Search
+3. **Use the MCP Server**: This MCP server allows AI agents (like Claude Desktop or Cursor's AI) to query your synced files
+4. **Automatic Updates**: As you work, the extension keeps your files in sync, and the MCP server provides real-time access to your codebase
+
+The extension creates a `document-sync.json` file in your project root, which this MCP server uses to automatically detect your project configuration.
+
 ## Prerequisites
 
 1.  **Node.js**: Ensure Node.js is installed.
@@ -15,13 +44,13 @@ It automatically detects your project configuration from the `document-sync.json
 You can install this server directly from npm:
 
 ```bash
-npm install -g document-sync-mcp
+npm install -g @shoutoutlabs/document-sync-mcp
 ```
 
 Or run it directly with `npx`:
 
 ```bash
-npx document-sync-mcp
+npx @shoutoutlabs/document-sync-mcp
 ```
 
 ## Running the Server
@@ -33,7 +62,7 @@ npx document-sync-mcp
 ### Manual Run
 ```bash
 export GEMINI_API_KEY="your_api_key_here"
-npx document-sync-mcp
+npx @shoutoutlabs/document-sync-mcp
 ```
 
 ## Adding to Claude Desktop
@@ -47,7 +76,7 @@ To use this server with Claude Desktop, add the following to your `claude_deskto
       "command": "npx",
       "args": [
         "-y",
-        "document-sync-mcp"
+        "@shoutoutlabs/document-sync-mcp"
       ],
       "env": {
         "GEMINI_API_KEY": "your_api_key_here"
@@ -66,7 +95,7 @@ To use this server with Claude Desktop, add the following to your `claude_deskto
 5.  **Type**: `command`.
 6.  **Command**:
     ```bash
-    npx -y document-sync-mcp
+    npx -y @shoutoutlabs/document-sync-mcp
     ```
 7.  **Environment Variables**:
     - Key: `GEMINI_API_KEY`
