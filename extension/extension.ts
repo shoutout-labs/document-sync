@@ -128,6 +128,30 @@ export async function activate(context: vscode.ExtensionContext) {
         outputChannel.appendLine(`Watching Location: ${watchUri.fsPath}`);
     }
 
+    // --- File Tracking Helpers ---
+    interface FileMetadata {
+        mtime: number;
+        documentName: string;
+    }
+
+    const getFileMetadataKey = (projectName: string): string => {
+        return `geminiFileSync_${projectName}_metadata`;
+    };
+
+    const loadFileMetadata = async (projectName: string): Promise<Map<string, FileMetadata>> => {
+        const key = getFileMetadataKey(projectName);
+        const stored = context.workspaceState.get<Record<string, FileMetadata>>(key);
+        if (!stored) {
+            return new Map();
+        }
+        return new Map(Object.entries(stored));
+    };
+
+    const saveFileMetadata = async (projectName: string, metadata: Map<string, FileMetadata>): Promise<void> => {
+        const key = getFileMetadataKey(projectName);
+        const obj = Object.fromEntries(metadata);
+        await context.workspaceState.update(key, obj);
+    };
 
     // --- File Watcher ---
     let watcher: vscode.FileSystemWatcher | undefined;
@@ -160,9 +184,63 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         };
 
+        const onFileDelete = async (uri: vscode.Uri) => {
+            // Ignore node_modules and hidden files/directories
+            if (uri.path.includes('node_modules') || uri.path.includes('/.')) {
+                return;
+            }
+
+            // Ignore the settings file itself
+            if (uri.fsPath.endsWith('document-sync.json')) {
+                return;
+            }
+
+            const settings = await SettingsManager.loadSettings();
+            const currentProjectName = settings.projectName || 'Project';
+            
+            // Calculate relative path from watch location or workspace
+            let relativePath: string;
+            if (watchUri) {
+                const watchPath = watchUri.fsPath;
+                const filePath = uri.fsPath;
+                if (filePath.startsWith(watchPath)) {
+                    relativePath = path.relative(watchPath, filePath);
+                    // Normalize path separators
+                    relativePath = relativePath.split(path.sep).join('/');
+                } else {
+                    relativePath = vscode.workspace.asRelativePath(uri);
+                }
+            } else {
+                relativePath = vscode.workspace.asRelativePath(uri);
+            }
+
+            // Check if this file was tracked
+            const fileMetadata = await loadFileMetadata(currentProjectName);
+            const trackedFile = fileMetadata.get(relativePath);
+
+            if (trackedFile && trackedFile.documentName) {
+                try {
+                    const apiKey = await context.secrets.get('geminiApiKey');
+                    if (apiKey) {
+                        const geminiService = new GeminiService(apiKey);
+                        outputChannel.appendLine(`Deleting ${relativePath} from store...`);
+                        await geminiService.deleteDocument(trackedFile.documentName);
+                        fileMetadata.delete(relativePath);
+                        await saveFileMetadata(currentProjectName, fileMetadata);
+                        outputChannel.appendLine(`Deleted ${relativePath} from store.`);
+                        vscode.window.showInformationMessage(`Deleted ${relativePath} from store.`);
+                    }
+                } catch (error) {
+                    const errorMsg = `Failed to delete ${relativePath} from store: ${error}`;
+                    outputChannel.appendLine(errorMsg);
+                    vscode.window.showWarningMessage(errorMsg);
+                }
+            }
+        };
+
         context.subscriptions.push(watcher.onDidChange(onFileChange));
         context.subscriptions.push(watcher.onDidCreate(onFileChange));
-        context.subscriptions.push(watcher.onDidDelete(onFileChange));
+        context.subscriptions.push(watcher.onDidDelete(onFileDelete));
     }
 
 
@@ -296,48 +374,160 @@ export async function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine(`Selected folder: ${folderUri.fsPath}`);
             outputChannel.appendLine(`Target File Store: ${currentProjectName}`);
 
-            const files = await findFiles(folderUri);
-            if (files.length === 0) {
-                const msg = 'No supported files found to sync.';
-                vscode.window.showInformationMessage(msg);
-                outputChannel.appendLine(msg);
-                return;
-            }
-
             // Get or Create File Store
             outputChannel.appendLine(`Ensuring File Store '${currentProjectName}' exists...`);
             const storeName = await geminiService.getOrCreateFileSearchStore(currentProjectName);
             outputChannel.appendLine(`Using File Store: ${storeName}`);
 
-            const totalFiles = files.length;
-            let uploadedCount = 0;
-            outputChannel.appendLine(`Found ${totalFiles} files to sync.`);
+            // Load existing file metadata
+            const fileMetadata = await loadFileMetadata(currentProjectName);
+            outputChannel.appendLine(`Loaded metadata for ${fileMetadata.size} previously synced files.`);
+
+            // Get list of documents currently in the store
+            outputChannel.appendLine('Fetching documents from store...');
+            const storeDocuments = await geminiService.listDocuments(storeName);
+            const storeDocumentsByDisplayName = new Map<string, string>();
+            for (const doc of storeDocuments) {
+                if (doc.displayName) {
+                    storeDocumentsByDisplayName.set(doc.displayName, doc.name);
+                }
+            }
+            outputChannel.appendLine(`Found ${storeDocumentsByDisplayName.size} documents in store.`);
+
+            // Sync metadata with store: if a file exists in store but not in metadata, add it
+            // This handles cases where metadata was lost or is out of sync
+            for (const [displayName, documentName] of storeDocumentsByDisplayName) {
+                if (!fileMetadata.has(displayName)) {
+                    // File exists in store but not in metadata - we'll update metadata after checking local file
+                    outputChannel.appendLine(`File ${displayName} exists in store but not in metadata - will sync`);
+                }
+            }
+
+            // Find local files
+            const localFiles = await findFiles(folderUri);
+            if (localFiles.length === 0) {
+                const msg = 'No supported files found to sync.';
+                vscode.window.showInformationMessage(msg);
+                outputChannel.appendLine(msg);
+            }
+
+            // Build map of local files by relative path
+            const localFilesByPath = new Map<string, { uri: vscode.Uri; mtime: number }>();
+            const folderPath = folderUri.fsPath;
+            for (const file of localFiles) {
+                // Calculate relative path from folderUri (watch location)
+                let relativePath: string;
+                const filePath = file.fsPath;
+                if (filePath.startsWith(folderPath)) {
+                    relativePath = path.relative(folderPath, filePath);
+                    // Normalize path separators
+                    relativePath = relativePath.split(path.sep).join('/');
+                } else {
+                    relativePath = vscode.workspace.asRelativePath(file);
+                }
+                try {
+                    const stats = await fs.promises.stat(file.fsPath);
+                    localFilesByPath.set(relativePath, { uri: file, mtime: stats.mtimeMs });
+                } catch (err) {
+                    outputChannel.appendLine(`Warning: Could not stat ${relativePath}: ${err}`);
+                }
+            }
+
+            // Determine files to upload (new or changed)
+            const filesToUpload: Array<{ uri: vscode.Uri; relativePath: string; mtime: number }> = [];
+            for (const [relativePath, { uri, mtime }] of localFilesByPath) {
+                const existing = fileMetadata.get(relativePath);
+                // Check if file is new or has changed (compare mtime with small tolerance for precision)
+                const isNew = !existing;
+                const hasChanged = existing && Math.abs(existing.mtime - mtime) > 1000; // 1 second tolerance
+                
+                if (isNew) {
+                    outputChannel.appendLine(`File ${relativePath} is new, will upload`);
+                    filesToUpload.push({ uri, relativePath, mtime });
+                } else if (hasChanged) {
+                    outputChannel.appendLine(`File ${relativePath} has changed (old mtime: ${existing.mtime}, new mtime: ${mtime}), will upload`);
+                    filesToUpload.push({ uri, relativePath, mtime });
+                } else {
+                    outputChannel.appendLine(`File ${relativePath} is unchanged, skipping`);
+                }
+            }
+
+            // Determine files to delete from store (no longer exist locally)
+            const filesToDelete: Array<{ displayName: string; documentName: string }> = [];
+            for (const [displayName, documentName] of storeDocumentsByDisplayName) {
+                if (!localFilesByPath.has(displayName)) {
+                    filesToDelete.push({ displayName, documentName });
+                }
+            }
+
+            outputChannel.appendLine(`Files to upload: ${filesToUpload.length}`);
+            outputChannel.appendLine(`Files to delete: ${filesToDelete.length}`);
+
+            const totalOperations = filesToUpload.length + filesToDelete.length;
+            let completedOperations = 0;
 
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: "Syncing files to Gemini",
                 cancellable: true
             }, async (progress, token) => {
-                for (const file of files) {
+                // Delete files that no longer exist locally
+                for (const { displayName, documentName } of filesToDelete) {
                     if (token.isCancellationRequested) {
                         outputChannel.appendLine('Sync cancelled by user.');
                         break;
                     }
 
-                    const relativePath = vscode.workspace.asRelativePath(file);
-                    // Use relative path as display name in the store
-                    const displayName = relativePath;
+                    progress.report({ 
+                        message: `Deleting ${displayName}...`, 
+                        increment: totalOperations > 0 ? 100 / totalOperations : 0 
+                    });
+                    outputChannel.appendLine(`Deleting ${displayName}...`);
 
-                    progress.report({ message: `Uploading ${relativePath}...`, increment: 100 / totalFiles });
+                    try {
+                        await geminiService.deleteDocument(documentName);
+                        fileMetadata.delete(displayName);
+                        outputChannel.appendLine(`Deleted ${displayName}`);
+                        completedOperations++;
+                    } catch (err) {
+                        const errorMsg = `Failed to delete ${displayName}: ${err}`;
+                        console.error(errorMsg);
+                        outputChannel.appendLine(errorMsg);
+                    }
+                }
+
+                // Upload new or changed files
+                for (const { uri, relativePath, mtime } of filesToUpload) {
+                    if (token.isCancellationRequested) {
+                        outputChannel.appendLine('Sync cancelled by user.');
+                        break;
+                    }
+
+                    progress.report({ 
+                        message: `Uploading ${relativePath}...`, 
+                        increment: totalOperations > 0 ? 100 / totalOperations : 0 
+                    });
                     outputChannel.appendLine(`Uploading ${relativePath}...`);
 
                     try {
-                        const mimeType = getMimeType(file.fsPath);
+                        const mimeType = getMimeType(uri.fsPath);
                         if (mimeType) {
-                            await geminiService.uploadFile(storeName, file.fsPath, mimeType, displayName);
-                            const msg = `Uploaded ${displayName}`;
-                            outputChannel.appendLine(msg);
-                            uploadedCount++;
+                            // If file already exists in store, delete it first (only for changed files)
+                            const existingDocName = storeDocumentsByDisplayName.get(relativePath);
+                            if (existingDocName) {
+                                try {
+                                    await geminiService.deleteDocument(existingDocName);
+                                    outputChannel.appendLine(`Deleted old version of ${relativePath} from store`);
+                                } catch (err) {
+                                    outputChannel.appendLine(`Warning: Could not delete old version of ${relativePath}: ${err}`);
+                                }
+                            }
+
+                            await geminiService.uploadFile(storeName, uri.fsPath, mimeType, relativePath);
+                            // Update metadata with new mtime (documentName will be updated below)
+                            fileMetadata.set(relativePath, { mtime, documentName: '' });
+                            outputChannel.appendLine(`Uploaded ${relativePath}`);
+                            completedOperations++;
                         }
                     } catch (err) {
                         const errorMsg = `Failed to upload ${relativePath}: ${err}`;
@@ -345,9 +535,37 @@ export async function activate(context: vscode.ExtensionContext) {
                         outputChannel.appendLine(errorMsg);
                     }
                 }
+
+                // Update metadata with current document names from store
+                // This ensures all files (including unchanged ones) have correct documentName and mtime
+                const updatedStoreDocuments = await geminiService.listDocuments(storeName);
+                for (const doc of updatedStoreDocuments) {
+                    if (doc.displayName) {
+                        const localFile = localFilesByPath.get(doc.displayName);
+                        if (fileMetadata.has(doc.displayName)) {
+                            // Update existing metadata with document name and current mtime
+                            const meta = fileMetadata.get(doc.displayName)!;
+                            meta.documentName = doc.name;
+                            if (localFile) {
+                                meta.mtime = localFile.mtime; // Update mtime to current value
+                            }
+                        } else if (localFile) {
+                            // File exists in store and locally but not in metadata - add it
+                            fileMetadata.set(doc.displayName, {
+                                mtime: localFile.mtime,
+                                documentName: doc.name
+                            });
+                            outputChannel.appendLine(`Added missing metadata for ${doc.displayName}`);
+                        }
+                    }
+                }
+
+                // Save updated metadata
+                await saveFileMetadata(currentProjectName, fileMetadata);
+                outputChannel.appendLine(`Saved metadata for ${fileMetadata.size} files`);
             });
 
-            const summary = `Sync complete. Uploaded ${uploadedCount}/${totalFiles} files to Store '${currentProjectName}'.`;
+            const summary = `Sync complete. Uploaded ${filesToUpload.length} file(s), deleted ${filesToDelete.length} file(s).`;
             vscode.window.showInformationMessage(summary);
             outputChannel.appendLine(summary);
 

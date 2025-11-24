@@ -4,3 +4,5 @@ mcp-server/build/
 out/
 mcp-server/**.js */
 .playwright-mcp/
+extension/out/
+extension/*.vsix

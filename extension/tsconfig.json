@@ -8,14 +8,14 @@
             "DOM"
         ],
         "sourceMap": true,
-        "rootDir": "extension",
+        "rootDir": ".",
         "strict": true,
         "skipLibCheck": true
     },
     "exclude": [
         "node_modules",
         ".vscode-test",
-        "mcp-server",
-        "web-client"
+        "../mcp-server",
+        "../web-client"
     ]
 }

@@ -1,0 +1,2 @@
+Sync project files to Google's Gemini File Search API for AI-powered code understanding. VS Code/Cursor extension, MCP server, and web client included.
+

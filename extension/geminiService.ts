@@ -72,4 +72,37 @@ export class GeminiService {
             throw new Error(`Failed to upload file ${displayName}: ${error.message || error}`);
         }
     }
+
+    async listDocuments(storeName: string): Promise<Array<{ name: string; displayName?: string }>> {
+        try {
+            const documents: Array<{ name: string; displayName?: string }> = [];
+            const documentsResult = await this.ai.fileSearchStores.documents.list({
+                parent: storeName
+            });
+
+            for await (const doc of documentsResult) {
+                if (doc.name) {
+                    documents.push({
+                        name: doc.name,
+                        displayName: doc.displayName
+                    });
+                }
+            }
+
+            return documents;
+        } catch (error: any) {
+            throw new Error(`Failed to list documents: ${error.message || error}`);
+        }
+    }
+
+    async deleteDocument(documentName: string): Promise<void> {
+        try {
+            await this.ai.fileSearchStores.documents.delete({
+                name: documentName,
+                config: { force: true }
+            });
+        } catch (error: any) {
+            throw new Error(`Failed to delete document ${documentName}: ${error.message || error}`);
+        }
+    }
 }

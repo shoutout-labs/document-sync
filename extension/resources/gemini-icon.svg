@@ -1,0 +1,47 @@
+<svg
+  width="24"
+  height="24"
+  viewBox="0 0 24 24"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <!-- Document -->
+  <path
+    d="M7 3H13L17 7V21H7V3Z"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M13 3V7H17"
+    stroke="currentColor"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Sync circle -->
+  <circle
+    cx="12"
+    cy="14"
+    r="4.5"
+    stroke="currentColor"
+    stroke-width="1.6"
+  />
+
+  <!-- Sync arrows -->
+  <path
+    d="M10.2 12.4L9 11.2M9 11.2L9 12.8M9 11.2H10.6"
+    stroke="currentColor"
+    stroke-width="1.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M13.8 15.6L15 16.8M15 16.8V15.2M15 16.8H13.4"
+    stroke="currentColor"
+    stroke-width="1.4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>
