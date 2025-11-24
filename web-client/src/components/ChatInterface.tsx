@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { askProject } from '../services/geminiService';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { ArrowLeft, Send } from 'lucide-react';
 
 interface ChatInterfaceProps {
     projectName: string;
@@ -43,97 +46,120 @@ export default function ChatInterface({ projectName, onBack }: ChatInterfaceProp
     };
 
     return (
-        <div className="w-full max-w-5xl bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl shadow-2xl flex flex-col h-[85vh] max-h-[800px] overflow-hidden transition-all duration-300 hover:shadow-purple-500/20">
-            {/* Header */}
-            <div className="p-5 md:p-6 border-b border-white/10 flex items-center justify-between bg-gradient-to-r from-white/5 to-white/10 backdrop-blur-sm">
-                <div className="flex items-center gap-3 md:gap-4">
-                    <div className="w-12 h-12 md:w-14 md:h-14 rounded-xl bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-lg md:text-xl shadow-lg shadow-purple-500/30">
-                        {projectName.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                        <h2 className="text-base md:text-lg font-bold text-white">{projectName}</h2>
-                        <p className="text-xs text-gray-400 flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse"></span>
-                            Gemini File Search
-                        </p>
-                    </div>
-                </div>
-                <button
+        <div className="h-full flex flex-col bg-white">
+            {/* Minimal Header */}
+            <div className="h-14 bg-white border-b border-gray-200 flex items-center px-4">
+                <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={onBack}
-                    className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white transition-all duration-200 text-sm font-medium border border-white/10 hover:border-white/20 hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-purple-500/50"
+                    className="text-gray-600 hover:text-gray-900"
                 >
-                    <span className="hidden md:inline">Change Project</span>
-                    <span className="md:hidden">Back</span>
-                </button>
-            </div>
-
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 md:space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-                {messages.length === 0 && (
-                    <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-6 animate-in fade-in duration-500">
-                        <div className="w-20 h-20 md:w-24 md:h-24 rounded-2xl bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10 border border-white/10 flex items-center justify-center backdrop-blur-sm shadow-lg">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 md:h-12 md:w-12 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                            </svg>
-                        </div>
-                        <div className="text-center space-y-2">
-                            <p className="text-gray-300 text-base md:text-lg font-medium">Start a conversation</p>
-                            <p className="text-gray-500 text-sm">Ask questions about your project files</p>
-                        </div>
-                    </div>
-                )}
-
-                {messages.map((msg, idx) => (
-                    <div 
-                        key={idx} 
-                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
-                        style={{ animationDelay: `${idx * 50}ms` }}
-                    >
-                        <div className={`max-w-[85%] md:max-w-[75%] rounded-2xl px-4 md:px-6 py-3 md:py-4 shadow-lg ${
-                            msg.role === 'user'
-                                ? 'bg-gradient-to-br from-blue-600 to-blue-500 text-white rounded-br-none'
-                                : 'bg-white/10 text-gray-100 rounded-bl-none border border-white/10 backdrop-blur-sm'
-                        }`}>
-                            <div className="whitespace-pre-wrap leading-relaxed text-sm md:text-base">{msg.content}</div>
-                        </div>
-                    </div>
-                ))}
-
-                {loading && (
-                    <div className="flex justify-start animate-in fade-in duration-300">
-                        <div className="bg-white/10 text-gray-300 rounded-2xl rounded-bl-none px-5 md:px-6 py-4 border border-white/10 flex items-center gap-2 backdrop-blur-sm shadow-lg">
-                            <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                            <div className="w-2 h-2 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                            <div className="w-2 h-2 bg-pink-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                    </div>
-                )}
-                <div ref={messagesEndRef} />
-            </div>
-
-            {/* Input Area */}
-            <form onSubmit={handleSubmit} className="p-4 md:p-6 border-t border-white/10 bg-gradient-to-r from-white/5 to-white/10 backdrop-blur-sm">
-                <div className="flex gap-3 md:gap-4">
-                    <input
-                        type="text"
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder="Ask a question about your codebase..."
-                        className="flex-1 px-5 md:px-6 py-3 md:py-4 bg-black/20 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all text-sm md:text-base backdrop-blur-sm"
-                        disabled={loading}
-                    />
-                    <button
-                        type="submit"
-                        disabled={loading || !input.trim()}
-                        className="px-6 md:px-8 py-3 md:py-4 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white font-semibold rounded-xl hover:from-blue-500 hover:via-purple-500 hover:to-pink-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-purple-500/50 text-sm md:text-base"
-                    >
-                        <span className="hidden md:inline">Send</span>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 md:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                        </svg>
-                    </button>
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back to Projects
+                </Button>
+                <div className="ml-4 text-sm text-gray-500">
+                    {projectName}
                 </div>
-            </form>
+            </div>
+
+            {/* Messages Area - ChatGPT Style */}
+            <div className="flex-1 overflow-y-auto">
+                <div className="max-w-3xl mx-auto px-4 py-8">
+                    {messages.length === 0 && (
+                        <div className="flex flex-col items-center justify-center h-full min-h-[400px] text-center space-y-4">
+                            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                                <span className="text-white text-xl font-bold">G</span>
+                            </div>
+                            <div>
+                                <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+                                    How can I help you today?
+                                </h2>
+                            </div>
+                        </div>
+                    )}
+
+                    {messages.map((msg, idx) => (
+                        <div 
+                            key={idx} 
+                            className="group mb-6"
+                        >
+                            <div className="flex gap-4">
+                                {/* Avatar */}
+                                <div className="flex-shrink-0">
+                                    {msg.role === 'assistant' ? (
+                                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                                            <span className="text-white text-sm font-bold">G</span>
+                                        </div>
+                                    ) : (
+                                        <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center">
+                                            <span className="text-gray-600 text-sm font-semibold">U</span>
+                                        </div>
+                                    )}
+                                </div>
+                                
+                                {/* Message Content */}
+                                <div className="flex-1 min-w-0">
+                                    <div className="prose prose-sm max-w-none">
+                                        <div className="text-gray-900 whitespace-pre-wrap leading-relaxed">
+                                            {msg.content}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+
+                    {loading && (
+                        <div className="group mb-6">
+                            <div className="flex gap-4">
+                                <div className="flex-shrink-0">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                                        <span className="text-white text-sm font-bold">G</span>
+                                    </div>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="flex gap-1.5 items-center">
+                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <div ref={messagesEndRef} />
+                </div>
+            </div>
+
+            {/* Input Area - ChatGPT Style */}
+            <div className="border-t border-gray-200 bg-white">
+                <div className="max-w-3xl mx-auto px-4 py-4">
+                    <form onSubmit={handleSubmit} className="relative">
+                        <div className="relative">
+                            <Input
+                                type="text"
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                placeholder="Message Gemini Document Sync..."
+                                disabled={loading}
+                                className="w-full h-12 pr-12 pl-4 bg-white border-gray-300 rounded-2xl focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            />
+                            <Button
+                                type="submit"
+                                disabled={loading || !input.trim()}
+                                size="icon"
+                                className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-lg bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <Send className="h-4 w-4" />
+                            </Button>
+                        </div>
+                        <p className="text-xs text-gray-500 text-center mt-2">
+                            Gemini Document Sync can make mistakes. Check important info.
+                        </p>
+                    </form>
+                </div>
+            </div>
         </div>
     );
 }
