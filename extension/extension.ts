@@ -88,7 +88,22 @@ export async function activate(context: vscode.ExtensionContext) {
             });
 
             if (folderResult && folderResult.length > 0) {
-                watchPath = folderResult[0].fsPath;
+                // Convert absolute path to relative path from workspace root
+                const selectedPath = folderResult[0].fsPath;
+                if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                    if (selectedPath.startsWith(workspaceRoot)) {
+                        watchPath = path.relative(workspaceRoot, selectedPath);
+                        // Normalize path separators to forward slashes
+                        watchPath = watchPath.split(path.sep).join('/');
+                    } else {
+                        // If selected path is outside workspace, store as absolute (fallback)
+                        watchPath = selectedPath;
+                    }
+                } else {
+                    // No workspace folder, store as absolute (fallback)
+                    watchPath = selectedPath;
+                }
                 await SettingsManager.updateSetting('watchLocation', watchPath);
                 
                 // Check if all settings are complete and prompt for sync (if not called from getProjectName)
@@ -97,7 +112,25 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
             }
         }
-        return watchPath ? vscode.Uri.file(watchPath) : undefined;
+        
+        // Convert relative path back to absolute path
+        if (watchPath) {
+            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                // Check if it's already an absolute path (backward compatibility)
+                if (path.isAbsolute(watchPath)) {
+                    return vscode.Uri.file(watchPath);
+                } else {
+                    // It's a relative path, join with workspace root
+                    const absolutePath = path.join(workspaceRoot, watchPath);
+                    return vscode.Uri.file(absolutePath);
+                }
+            } else {
+                // No workspace folder, assume it's absolute (backward compatibility)
+                return vscode.Uri.file(watchPath);
+            }
+        }
+        return undefined;
     };
 
     const checkAndPromptSync = async (): Promise<void> => {
@@ -145,53 +178,61 @@ export async function activate(context: vscode.ExtensionContext) {
                 ];
                 quickPick.canSelectMany = false;
 
-                // Track what the user types
-                let typedValue = '';
-                quickPick.onDidChangeValue((value) => {
-                    typedValue = value;
-                });
-
                 // Show the QuickPick and wait for selection
-                const selected = await new Promise<vscode.QuickPickItem | undefined>((resolve) => {
+                const selected = await new Promise<{ item: vscode.QuickPickItem | undefined; typedValue: string }>((resolve) => {
+                    let finalTypedValue = '';
+                    quickPick.onDidChangeValue((value) => {
+                        finalTypedValue = value;
+                    });
+
                     quickPick.onDidAccept(() => {
                         const selectedItem = quickPick.selectedItems[0];
+                        const currentValue = quickPick.value || finalTypedValue;
+                        
                         if (selectedItem) {
-                            resolve(selectedItem);
-                        } else if (typedValue && !existingProjects.includes(typedValue)) {
+                            resolve({ item: selectedItem, typedValue: currentValue });
+                        } else if (currentValue && !existingProjects.includes(currentValue)) {
                             // User typed something new that doesn't match any project, use it directly
-                            resolve({ label: typedValue } as vscode.QuickPickItem);
+                            resolve({ item: { label: currentValue } as vscode.QuickPickItem, typedValue: currentValue });
                         } else {
-                            resolve(undefined);
+                            resolve({ item: undefined, typedValue: currentValue });
                         }
                         quickPick.dispose();
                     });
                     quickPick.onDidHide(() => {
-                        resolve(undefined);
+                        resolve({ item: undefined, typedValue: '' });
                         quickPick.dispose();
                     });
                     quickPick.show();
                 });
 
-                if (selected) {
-                    if (selected.label === '$(add) Create new project...') {
-                        // Show input box for new project name
-                        projectName = await vscode.window.showInputBox({
-                            prompt: 'Enter a Project Name for Gemini File Sync',
-                            ignoreFocusOut: true,
-                            placeHolder: 'My Awesome Project',
-                            validateInput: (value) => {
-                                if (!value || value.trim().length === 0) {
-                                    return 'Project name cannot be empty';
+                if (selected.item) {
+                    if (selected.item.label === '$(add) Create new project...') {
+                        // If user typed a value, use it directly (after validation)
+                        const typedValue = selected.typedValue.trim();
+                        if (typedValue && typedValue.length > 0 && !existingProjects.includes(typedValue)) {
+                            projectName = typedValue;
+                        } else {
+                            // Show input box for new project name (pre-fill with typed value if available)
+                            projectName = await vscode.window.showInputBox({
+                                prompt: 'Enter a Project Name for Gemini File Sync',
+                                ignoreFocusOut: true,
+                                placeHolder: 'My Awesome Project',
+                                value: typedValue || undefined,
+                                validateInput: (value) => {
+                                    if (!value || value.trim().length === 0) {
+                                        return 'Project name cannot be empty';
+                                    }
+                                    if (existingProjects.includes(value.trim())) {
+                                        return 'A project with this name already exists';
+                                    }
+                                    return null;
                                 }
-                                if (existingProjects.includes(value.trim())) {
-                                    return 'A project with this name already exists';
-                                }
-                                return null;
-                            }
-                        });
+                            });
+                        }
                     } else {
                         // Use selected existing project or typed new project name
-                        projectName = selected.label;
+                        projectName = selected.item.label;
                     }
                 }
             } else {
@@ -232,7 +273,13 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const watchUri = await getWatchLocation();
     if (watchUri) {
-        outputChannel.appendLine(`Watching Location: ${watchUri.fsPath}`);
+        const settings = await SettingsManager.loadSettings();
+        const watchPath = settings.watchLocation || watchUri.fsPath;
+        // Display relative path if available, otherwise absolute
+        const displayPath = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0 && !path.isAbsolute(watchPath))
+            ? watchPath
+            : vscode.workspace.asRelativePath(watchUri);
+        outputChannel.appendLine(`Watching Location: ${displayPath}`);
     }
 
     // --- File Tracking Helpers ---
@@ -459,7 +506,21 @@ export async function activate(context: vscode.ExtensionContext) {
         const storedWatchPath = settings.watchLocation;
 
         if (storedWatchPath) {
-            folderUri = vscode.Uri.file(storedWatchPath);
+            // Convert relative path back to absolute path
+            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                // Check if it's already an absolute path (backward compatibility)
+                if (path.isAbsolute(storedWatchPath)) {
+                    folderUri = vscode.Uri.file(storedWatchPath);
+                } else {
+                    // It's a relative path, join with workspace root
+                    const absolutePath = path.join(workspaceRoot, storedWatchPath);
+                    folderUri = vscode.Uri.file(absolutePath);
+                }
+            } else {
+                // No workspace folder, assume it's absolute (backward compatibility)
+                folderUri = vscode.Uri.file(storedWatchPath);
+            }
         } else {
             const folderResult = await vscode.window.showOpenDialog({
                 canSelectFiles: false,
