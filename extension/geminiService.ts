@@ -10,22 +10,15 @@ export class GeminiService {
     async getOrCreateFileSearchStore(displayName: string): Promise<string> {
         try {
             // List existing stores to check if one with the display name exists
-            // Note: The list API might be paginated, for simplicity we check the first page or assume reasonable number
-            // The SDK documentation/snippet doesn't show list, but we can try to list or just create.
-            // If we just create, we might create duplicates.
-            // Let's try to list if possible. If not, we'll just create (or maybe the API handles duplicates?)
-            // Based on the snippet, it just creates. Let's try to list first if we can find the method.
-            // Since I don't have full docs, I'll assume we can list.
-            // Actually, the snippet implies we just create. Let's try to list using `ai.fileSearchStores.list()` if it exists.
-
             let existingStoreId: string | undefined;
             try {
                 const listResult = await this.ai.fileSearchStores.list();
-                // Assuming listResult has .fileSearchStores or similar
-                if (listResult && listResult.fileSearchStores) {
-                    const store = listResult.fileSearchStores.find((s: any) => s.displayName === displayName);
-                    if (store) {
+                
+                // Iterate over the async iterable (similar to listFileStores)
+                for await (const store of listResult) {
+                    if (store.displayName === displayName) {
                         existingStoreId = store.name;
+                        break;
                     }
                 }
             } catch (e) {
@@ -103,6 +96,25 @@ export class GeminiService {
             });
         } catch (error: any) {
             throw new Error(`Failed to delete document ${documentName}: ${error.message || error}`);
+        }
+    }
+
+    async listFileStores(): Promise<string[]> {
+        try {
+            const listResult = await this.ai.fileSearchStores.list();
+            const projects = new Set<string>();
+
+            // Iterate over the Pager
+            for await (const store of listResult) {
+                if (store.displayName) {
+                    projects.add(store.displayName);
+                }
+            }
+
+            return Array.from(projects).sort();
+        } catch (error: any) {
+            console.warn("Failed to list file search stores:", error);
+            return [];
         }
     }
 }

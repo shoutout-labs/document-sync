@@ -69,7 +69,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
-    "publish": "vsce publish"
+    "publish": "vsce publish",
+    "publish:openvsx": "npx ovsx publish",
+    "publish:cursor": "npx ovsx publish"
   },
   "devDependencies": {
     "@types/node": "18.x",

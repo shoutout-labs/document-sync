@@ -4,7 +4,7 @@ import * as path from 'path';
 import { GeminiService } from './geminiService';
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('Congratulations, your extension "gemini-file-sync" is now active!');
+    console.log('Congratulations, your extension "file-sync" is now active!');
 
     const outputChannel = vscode.window.createOutputChannel("Gemini File Sync");
     context.subscriptions.push(outputChannel);
@@ -74,24 +74,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     }
 
-    const getProjectName = async (): Promise<string | undefined> => {
-        let settings = await SettingsManager.loadSettings();
-        let projectName = settings.projectName;
-
-        if (!projectName) {
-            projectName = await vscode.window.showInputBox({
-                prompt: 'Enter a Project Name for Gemini File Sync',
-                ignoreFocusOut: true,
-                placeHolder: 'My Awesome Project'
-            });
-            if (projectName) {
-                await SettingsManager.updateSetting('projectName', projectName);
-            }
-        }
-        return projectName;
-    };
-
-    const getWatchLocation = async (): Promise<vscode.Uri | undefined> => {
+    const getWatchLocation = async (promptForSync: boolean = true): Promise<vscode.Uri | undefined> => {
         let settings = await SettingsManager.loadSettings();
         let watchPath = settings.watchLocation;
 
@@ -107,9 +90,133 @@ export async function activate(context: vscode.ExtensionContext) {
             if (folderResult && folderResult.length > 0) {
                 watchPath = folderResult[0].fsPath;
                 await SettingsManager.updateSetting('watchLocation', watchPath);
+                
+                // Check if all settings are complete and prompt for sync (if not called from getProjectName)
+                if (promptForSync) {
+                    await checkAndPromptSync();
+                }
             }
         }
         return watchPath ? vscode.Uri.file(watchPath) : undefined;
+    };
+
+    const checkAndPromptSync = async (): Promise<void> => {
+        const apiKey = await context.secrets.get('geminiApiKey');
+        const settings = await SettingsManager.loadSettings();
+        const allSettingsComplete = apiKey && settings.projectName && settings.watchLocation;
+
+        if (allSettingsComplete) {
+            const selection = await vscode.window.showInformationMessage(
+                `All settings are configured. Would you like to sync documents now?`,
+                'Sync Now',
+                'Later'
+            );
+
+            if (selection === 'Sync Now') {
+                vscode.commands.executeCommand('geminiFileSearch.sync');
+            }
+        }
+    };
+
+    const getProjectName = async (): Promise<string | undefined> => {
+        let settings = await SettingsManager.loadSettings();
+        let projectName = settings.projectName;
+
+        if (!projectName) {
+            // Get existing projects from Gemini API
+            let existingProjects: string[] = [];
+            try {
+                const apiKey = await context.secrets.get('geminiApiKey');
+                if (apiKey) {
+                    const geminiService = new GeminiService(apiKey);
+                    existingProjects = await geminiService.listFileStores();
+                }
+            } catch (error) {
+                console.warn('Failed to fetch existing projects:', error);
+            }
+
+            // If there are existing projects, show QuickPick with autocomplete
+            if (existingProjects.length > 0) {
+                const quickPick = vscode.window.createQuickPick();
+                quickPick.placeholder = 'Type to search existing projects or create a new one...';
+                quickPick.items = [
+                    { label: '$(add) Create new project...', description: 'Enter a new project name', alwaysShow: true },
+                    ...existingProjects.map(name => ({ label: name }))
+                ];
+                quickPick.canSelectMany = false;
+
+                // Track what the user types
+                let typedValue = '';
+                quickPick.onDidChangeValue((value) => {
+                    typedValue = value;
+                });
+
+                // Show the QuickPick and wait for selection
+                const selected = await new Promise<vscode.QuickPickItem | undefined>((resolve) => {
+                    quickPick.onDidAccept(() => {
+                        const selectedItem = quickPick.selectedItems[0];
+                        if (selectedItem) {
+                            resolve(selectedItem);
+                        } else if (typedValue && !existingProjects.includes(typedValue)) {
+                            // User typed something new that doesn't match any project, use it directly
+                            resolve({ label: typedValue } as vscode.QuickPickItem);
+                        } else {
+                            resolve(undefined);
+                        }
+                        quickPick.dispose();
+                    });
+                    quickPick.onDidHide(() => {
+                        resolve(undefined);
+                        quickPick.dispose();
+                    });
+                    quickPick.show();
+                });
+
+                if (selected) {
+                    if (selected.label === '$(add) Create new project...') {
+                        // Show input box for new project name
+                        projectName = await vscode.window.showInputBox({
+                            prompt: 'Enter a Project Name for Gemini File Sync',
+                            ignoreFocusOut: true,
+                            placeHolder: 'My Awesome Project',
+                            validateInput: (value) => {
+                                if (!value || value.trim().length === 0) {
+                                    return 'Project name cannot be empty';
+                                }
+                                if (existingProjects.includes(value.trim())) {
+                                    return 'A project with this name already exists';
+                                }
+                                return null;
+                            }
+                        });
+                    } else {
+                        // Use selected existing project or typed new project name
+                        projectName = selected.label;
+                    }
+                }
+            } else {
+                // No existing projects, just show input box
+                projectName = await vscode.window.showInputBox({
+                    prompt: 'Enter a Project Name for Gemini File Sync',
+                    ignoreFocusOut: true,
+                    placeHolder: 'My Awesome Project'
+                });
+            }
+
+            if (projectName) {
+                await SettingsManager.updateSetting('projectName', projectName);
+                
+                // Automatically prompt for watch location if not set
+                const updatedSettings = await SettingsManager.loadSettings();
+                if (!updatedSettings.watchLocation) {
+                    await getWatchLocation(false); // Don't prompt for sync here, we'll do it after
+                }
+                
+                // Check if all settings are complete and prompt for sync
+                await checkAndPromptSync();
+            }
+        }
+        return projectName;
     };
 
     // --- Startup Logic ---
@@ -304,6 +411,7 @@ export async function activate(context: vscode.ExtensionContext) {
         await SettingsManager.updateSetting('projectName', undefined); // Clear to force prompt
         await getProjectName();
         treeDataProvider.refresh();
+        // checkAndPromptSync is already called in getProjectName
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.changeWatchLocation', async () => {
@@ -311,6 +419,7 @@ export async function activate(context: vscode.ExtensionContext) {
         await getWatchLocation();
         vscode.window.showInformationMessage("Watch location updated. Reload window to apply watcher changes fully.");
         treeDataProvider.refresh();
+        // checkAndPromptSync is already called in getWatchLocation
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.updateApiKey', async () => {
@@ -323,6 +432,8 @@ export async function activate(context: vscode.ExtensionContext) {
             await context.secrets.store('geminiApiKey', newApiKey);
             vscode.window.showInformationMessage('API Key updated successfully.');
             treeDataProvider.refresh();
+            // Check if all settings are complete and prompt for sync
+            await checkAndPromptSync();
         }
     }));
 
