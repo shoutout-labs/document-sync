@@ -2,7 +2,7 @@
   "name": "document-sync",
   "displayName": "Document Sync",
   "description": "Sync files to a central location with Gemini File Search API. Compatible with VS Code and Cursor. It also allows you to chat with your project files using Gemini File Search.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "publisher": "shoutoutlabs",
   "icon": "icon.png",
   "license": "MIT",

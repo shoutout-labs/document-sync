@@ -146,7 +146,17 @@ export async function activate(context: vscode.ExtensionContext) {
             );
 
             if (selection === 'Sync Now') {
-                vscode.commands.executeCommand('geminiFileSearch.sync');
+                // Defer command execution to ensure the command is registered
+                // This is needed because checkAndPromptSync can be called during startup
+                // before all commands are registered
+                setTimeout(async () => {
+                    try {
+                        await vscode.commands.executeCommand('geminiFileSearch.sync');
+                    } catch (error: any) {
+                        // If command execution fails, show a helpful message
+                        vscode.window.showErrorMessage(`Failed to start sync: ${error?.message || error || 'Unknown error'}`);
+                    }
+                }, 100);
             }
         }
     };
@@ -373,21 +383,30 @@ export async function activate(context: vscode.ExtensionContext) {
             const trackedFile = fileMetadata.get(relativePath);
 
             if (trackedFile && trackedFile.documentName) {
-                try {
-                    const apiKey = await context.secrets.get('geminiApiKey');
-                    if (apiKey) {
-                        const geminiService = new GeminiService(apiKey);
-                        outputChannel.appendLine(`Deleting ${relativePath} from store...`);
-                        await geminiService.deleteDocument(trackedFile.documentName);
-                        fileMetadata.delete(relativePath);
-                        await saveFileMetadata(currentProjectName, fileMetadata);
-                        outputChannel.appendLine(`Deleted ${relativePath} from store.`);
-                        vscode.window.showInformationMessage(`Deleted ${relativePath} from store.`);
+                // Ask user for permission to delete from store
+                const selection = await vscode.window.showInformationMessage(
+                    `File ${relativePath} was deleted. Do you want to remove it from the store?`,
+                    'Delete from Store',
+                    'Cancel'
+                );
+
+                if (selection === 'Delete from Store') {
+                    try {
+                        const apiKey = await context.secrets.get('geminiApiKey');
+                        if (apiKey) {
+                            const geminiService = new GeminiService(apiKey);
+                            outputChannel.appendLine(`Deleting ${relativePath} from store...`);
+                            await geminiService.deleteDocument(trackedFile.documentName);
+                            fileMetadata.delete(relativePath);
+                            await saveFileMetadata(currentProjectName, fileMetadata);
+                            outputChannel.appendLine(`Deleted ${relativePath} from store.`);
+                            vscode.window.showInformationMessage(`Deleted ${relativePath} from store.`);
+                        }
+                    } catch (error) {
+                        const errorMsg = `Failed to delete ${relativePath} from store: ${error}`;
+                        outputChannel.appendLine(errorMsg);
+                        vscode.window.showWarningMessage(errorMsg);
                     }
-                } catch (error) {
-                    const errorMsg = `Failed to delete ${relativePath} from store: ${error}`;
-                    outputChannel.appendLine(errorMsg);
-                    vscode.window.showWarningMessage(errorMsg);
                 }
             }
         };
@@ -624,18 +643,12 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
             }
 
-            // Determine files to delete from store (no longer exist locally)
-            const filesToDelete: Array<{ displayName: string; documentName: string }> = [];
-            for (const [displayName, documentName] of storeDocumentsByDisplayName) {
-                if (!localFilesByPath.has(displayName)) {
-                    filesToDelete.push({ displayName, documentName });
-                }
-            }
+            // Note: Files are not automatically deleted during sync.
+            // Deletions only happen when the file watcher detects a file deletion and user confirms.
 
             outputChannel.appendLine(`Files to upload: ${filesToUpload.length}`);
-            outputChannel.appendLine(`Files to delete: ${filesToDelete.length}`);
 
-            const totalOperations = filesToUpload.length + filesToDelete.length;
+            const totalOperations = filesToUpload.length;
             let completedOperations = 0;
 
             await vscode.window.withProgress({
@@ -643,30 +656,6 @@ export async function activate(context: vscode.ExtensionContext) {
                 title: "Syncing files to Gemini",
                 cancellable: true
             }, async (progress, token) => {
-                // Delete files that no longer exist locally
-                for (const { displayName, documentName } of filesToDelete) {
-                    if (token.isCancellationRequested) {
-                        outputChannel.appendLine('Sync cancelled by user.');
-                        break;
-                    }
-
-                    progress.report({ 
-                        message: `Deleting ${displayName}...`, 
-                        increment: totalOperations > 0 ? 100 / totalOperations : 0 
-                    });
-                    outputChannel.appendLine(`Deleting ${displayName}...`);
-
-                    try {
-                        await geminiService.deleteDocument(documentName);
-                        fileMetadata.delete(displayName);
-                        outputChannel.appendLine(`Deleted ${displayName}`);
-                        completedOperations++;
-                    } catch (err) {
-                        const errorMsg = `Failed to delete ${displayName}: ${err}`;
-                        console.error(errorMsg);
-                        outputChannel.appendLine(errorMsg);
-                    }
-                }
 
                 // Upload new or changed files
                 for (const { uri, relativePath, mtime } of filesToUpload) {
@@ -737,7 +726,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 outputChannel.appendLine(`Saved metadata for ${fileMetadata.size} files`);
             });
 
-            const summary = `Sync complete. Uploaded ${filesToUpload.length} file(s), deleted ${filesToDelete.length} file(s).`;
+            const summary = `Sync complete. Uploaded ${filesToUpload.length} file(s).`;
             vscode.window.showInformationMessage(summary);
             outputChannel.appendLine(summary);
 
