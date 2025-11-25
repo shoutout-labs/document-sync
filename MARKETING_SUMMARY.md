@@ -7,7 +7,7 @@ Document Sync is a comprehensive solution that automatically syncs your project 
 ### Demo
 
 <video width="100%" controls>
-  <source src="./resources/Document_Sync__Living_Brain.mp4" type="video/mp4">
+  <source src="resources/Document_Sync__Living_Brain.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
