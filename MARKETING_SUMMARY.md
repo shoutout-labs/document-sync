@@ -4,6 +4,13 @@
 
 Document Sync is a comprehensive solution that automatically syncs your project files and documentation to Google's Gemini File Search API, creating an intelligent, always-current knowledge base accessible to everyone in your organization—from developers to marketing, sales, support, and product teams.
 
+### Demo
+
+<video width="100%" controls>
+  <source src="./resources/Document_Sync__Living_Brain.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 ---
 
 ## Why Document Sync?

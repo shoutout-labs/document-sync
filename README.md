@@ -12,7 +12,10 @@ Document Sync consists of three main components:
 
 ### Demo
 
-Watch the demo video: [Document Sync - Living Brain](./resources/Document_Sync__Living_Brain.mp4)
+<video width="100%" controls>
+  <source src="./resources/Document_Sync__Living_Brain.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
 
 ## Features
 
@@ -54,13 +57,13 @@ npm run package
 The MCP server is available as an npm package:
 
 ```bash
-npm install -g document-sync-mcp
+npm install -g @shoutoutlabs/document-sync-mcp
 ```
 
 Or use it directly with npx:
 
 ```bash
-npx document-sync-mcp
+npx @shoutoutlabs/document-sync-mcp
 ```
 
 ### Web Client
@@ -116,7 +119,7 @@ Set your API key and run:
 
 ```bash
 export GEMINI_API_KEY="your_api_key_here"
-npx document-sync-mcp
+npx @shoutoutlabs/document-sync-mcp
 ```
 
 #### Adding to Claude Desktop
@@ -128,7 +131,10 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
   "mcpServers": {
     "gemini-file-search": {
       "command": "npx",
-      "args": ["-y", "document-sync-mcp"],
+      "args": [
+        "-y",
+        "@shoutoutlabs/document-sync-mcp"
+      ],
       "env": {
         "GEMINI_API_KEY": "your_api_key_here"
       }
@@ -145,7 +151,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 4. Configure:
    - **Name**: `gemini-file-search`
    - **Type**: `command`
-   - **Command**: `npx -y document-sync-mcp`
+   - **Command**: `npx -y @shoutoutlabs/document-sync-mcp`
    - **Environment Variables**: `GEMINI_API_KEY` = `your_api_key_here`
 
 #### Available Tools
