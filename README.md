@@ -10,6 +10,10 @@ Document Sync consists of three main components:
 2. **MCP Server** - Enable AI agents to query your project files via Model Context Protocol
 3. **Web Client** - Chat with your project files through a React web interface
 
+### Demo
+
+Watch the demo video: [Document Sync - Living Brain](./resources/Document_Sync__Living_Brain.mp4)
+
 ## Features
 
 - 🔄 **Automatic File Syncing** - Sync your project files to Gemini File Search API
