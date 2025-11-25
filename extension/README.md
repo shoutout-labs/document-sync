@@ -1,6 +1,6 @@
 # Document Sync
 
-Sync your project files to Google's Gemini File Search API and enable AI-powered code understanding. Compatible with VS Code and Cursor.
+Sync your project files to Google's Gemini File Search API and enable AI-powered code understanding. Compatible with VS Code and Cursor. Integrates seamlessly with [MCP servers](#mcp-server-integration) to enable AI agents (like Claude Desktop and Cursor's AI) to query your synced project files.
 
 ## Features
 
