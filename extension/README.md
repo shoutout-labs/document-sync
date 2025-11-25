@@ -1,6 +1,6 @@
 # Document Sync
 
-Sync your project files to Google's Gemini File Search API and enable AI-powered code understanding. Compatible with VS Code and Cursor.
+Sync your project files to Google's Gemini File Search API and enable AI-powered code understanding. Compatible with VS Code and Cursor. Integrates seamlessly with [MCP servers](#mcp-server-integration) to enable AI agents (like Claude Desktop and Cursor's AI) to query your synced project files.
 
 ## Features
 
@@ -51,6 +51,7 @@ The extension adds a "Gemini Sync" icon to your Activity Bar. Click it to access
 - **Change Project Name** - Update your project name
 - **Change Watch Location** - Change which directory to watch
 - **Update API Key** - Update your Gemini API key
+- **Enable/Disable Sync** - Toggle automatic file syncing for this project
 
 ### Commands
 
@@ -60,6 +61,7 @@ Access these commands via the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`):
 - `Gemini File Search: Login to Gemini` - Set or update your API key
 - `Gemini File Search: Change Project Name` - Change your project name
 - `Gemini File Search: Change Watch Location` - Change the directory to watch
+- `Gemini File Search: Toggle Sync` - Enable or disable automatic syncing for this project
 
 ### Automatic Syncing
 
@@ -76,11 +78,17 @@ Settings are stored in `document-sync.json` in your workspace root:
 ```json
 {
   "projectName": "my-project",
-  "watchLocation": "/path/to/watch"
+  "watchLocation": "src",
+  "syncEnabled": true
 }
 ```
 
-You can edit this file directly or use the extension commands to update settings.
+**Settings:**
+- `projectName` - The name of your project (creates a separate File Store in Gemini)
+- `watchLocation` - Relative path from workspace root to the directory to watch (or absolute path if outside workspace)
+- `syncEnabled` - Enable/disable automatic syncing (default: `true`)
+
+You can edit this file directly or use the extension commands to update settings. The MCP server automatically reads this configuration file to detect your project settings.
 
 ## How It Works
 
@@ -137,11 +145,120 @@ Each project name creates a separate "File Store" in Gemini. This allows you to:
 - **Project Analysis**: Query your project files using natural language
 - **Team Collaboration**: Share project context with AI-powered tools
 
+## MCP Server Integration
+
+The Document Sync extension works seamlessly with the **Gemini File Search MCP Server**, which allows AI agents (like Claude Desktop or Cursor's AI) to query your synced project files using the Model Context Protocol (MCP).
+
+### How It Works Together
+
+1. **Sync Your Files**: Use this extension to sync your project files to Gemini File Search
+2. **Use the MCP Server**: The MCP server automatically detects your project configuration from `document-sync.json`
+3. **AI Queries**: AI agents can now query your codebase using natural language
+4. **Automatic Updates**: As you work, the extension keeps files in sync, and the MCP server provides real-time access
+
+### Installing the MCP Server
+
+Install the MCP server globally:
+
+```bash
+npm install -g @shoutoutlabs/document-sync-mcp
+```
+
+Or use it directly with npx:
+
+```bash
+npx @shoutoutlabs/document-sync-mcp
+```
+
+### Configuration
+
+The MCP server automatically detects your project configuration from the `document-sync.json` file created by this extension. You only need to provide your Gemini API key:
+
+**Environment Variable:**
+- `GEMINI_API_KEY` (required) - Your Google Gemini API Key
+- `PROJECT_PATH` (optional) - Absolute path to project root (if not in current directory)
+
+### Adding to Claude Desktop
+
+Add the following to your Claude Desktop configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+
+```json
+{
+  "mcpServers": {
+    "gemini-file-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@shoutoutlabs/document-sync-mcp"
+      ],
+      "env": {
+        "GEMINI_API_KEY": "your_api_key_here"
+      }
+    }
+  }
+}
+```
+
+### Adding to Cursor
+
+1. Open Cursor Settings
+2. Navigate to **Features** > **MCP**
+3. Click **Add New MCP Server**
+4. Configure:
+   - **Name**: `gemini-file-search` (or any name you prefer)
+   - **Type**: `command`
+   - **Command**: `npx -y @shoutoutlabs/document-sync-mcp`
+   - **Environment Variables**: 
+     - Key: `GEMINI_API_KEY`
+     - Value: `your_api_key_here`
+
+### Available MCP Tools
+
+The MCP server provides the following tool:
+
+- **`ask_project(query: string, projectName?: string)`** - Ask questions about your project files
+  - `query`: The question to ask about your codebase
+  - `projectName`: (Optional) The name of the project. If not provided, the server uses the project name from `document-sync.json`
+
+### Example Usage
+
+Once configured, you can ask AI agents questions like:
+- "What does the authentication module do?"
+- "How does the file upload feature work?"
+- "Show me all the API endpoints in this project"
+- "Explain the database schema"
+
+The AI agent will use the MCP server to query your synced files and provide accurate answers based on your actual codebase.
+
+## Web Client
+
+The application also includes a **web-client** that can run on your own server. This provides a powerful web interface to manage and interact with your synced documents and projects.
+
+### Features
+
+- **View Synced Documents**: All documents and projects synced via the extension can be viewed in the web interface
+- **Project Management**: Manage your projects, knowledge bases, and documents through an intuitive web dashboard
+- **Team Collaboration**: Provide access to your dashboard for other teams (marketing, sales, etc.) so they have up-to-date documentation to retrieve information
+- **MCP Server Integration**: With the MCP server, you can get relevant application context directly in the chat interface
+- **Multi-Repository Support**: Ideal for managing multiple repositories for the same project (such as microservices), providing the same knowledge base across all repos
+
+### Advantages
+
+- **Team Access**: Share your documentation dashboard with non-technical team members who need access to up-to-date project information
+- **Context-Aware Chat**: The web client integrates with the MCP server to provide relevant application context during chat interactions
+- **Unified Knowledge Base**: Perfect for microservices architectures where you want a single knowledge base accessible across multiple repositories
+
+### Running the Web Client
+
+See the [web-client README](../web-client/README.md) for detailed setup instructions. The web client can be configured to use your Gemini API key via environment variable or entered directly in the interface.
+
+> **Important:** To see the same projects across the extension, MCP server, and web client, you must use the **same Gemini API key** in all three components. Each API key has its own set of File Search stores, so using different keys will show different projects.
+
 ## Related Tools
 
 This extension works great with:
-- **MCP Server**: Use `document-sync-mcp` to enable AI agents to query your files
-- **Web Client**: Chat with your project files through a web interface
+- **MCP Server**: Use `@shoutoutlabs/document-sync-mcp` to enable AI agents to query your files via Model Context Protocol
+- **Web Client**: Chat with your project files through a web interface and manage your knowledge bases
 
 ## Support
 

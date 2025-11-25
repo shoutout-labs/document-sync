@@ -2,7 +2,7 @@
   "name": "document-sync",
   "displayName": "Document Sync",
   "description": "Sync files to a central location with Gemini File Search API. Compatible with VS Code and Cursor. It also allows you to chat with your project files using Gemini File Search.",
-  "version": "1.0.1",
+  "version": "1.0.7",
   "publisher": "shoutoutlabs",
   "icon": "icon.png",
   "license": "MIT",
@@ -69,7 +69,9 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "vsce package",
-    "publish": "vsce publish"
+    "publish": "vsce publish",
+    "publish:openvsx": "npx ovsx publish",
+    "publish:cursor": "npx ovsx publish"
   },
   "devDependencies": {
     "@types/node": "18.x",

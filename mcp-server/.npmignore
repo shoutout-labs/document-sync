@@ -1,0 +1,9 @@
+src/
+node_modules/
+*.ts
+!*.d.ts
+tsconfig.json
+package-lock.json
+build/upload_test_file.js
+
+

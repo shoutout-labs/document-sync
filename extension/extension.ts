@@ -4,7 +4,7 @@ import * as path from 'path';
 import { GeminiService } from './geminiService';
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('Congratulations, your extension "gemini-file-sync" is now active!');
+    console.log('Congratulations, your extension "file-sync" is now active!');
 
     const outputChannel = vscode.window.createOutputChannel("Gemini File Sync");
     context.subscriptions.push(outputChannel);
@@ -29,6 +29,7 @@ export async function activate(context: vscode.ExtensionContext) {
     interface GeminiSettings {
         projectName?: string;
         watchLocation?: string;
+        syncEnabled?: boolean;
     }
 
     class SettingsManager {
@@ -53,7 +54,7 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        static async updateSetting(key: keyof GeminiSettings, value: string | undefined): Promise<void> {
+        static async updateSetting(key: keyof GeminiSettings, value: string | boolean | undefined): Promise<void> {
             const settingsPath = this.getSettingsPath();
             if (!settingsPath) {
                 return;
@@ -63,35 +64,20 @@ export async function activate(context: vscode.ExtensionContext) {
             if (value === undefined) {
                 delete settings[key];
             } else {
-                settings[key] = value;
+                settings[key] = value as any;
             }
 
             try {
-                await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+                await fs.promises.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+                // Small delay to ensure file system has updated
+                await new Promise(resolve => setTimeout(resolve, 50));
             } catch (error) {
                 vscode.window.showErrorMessage(`Failed to save settings to document-sync.json: ${error}`);
             }
         }
     }
 
-    const getProjectName = async (): Promise<string | undefined> => {
-        let settings = await SettingsManager.loadSettings();
-        let projectName = settings.projectName;
-
-        if (!projectName) {
-            projectName = await vscode.window.showInputBox({
-                prompt: 'Enter a Project Name for Gemini File Sync',
-                ignoreFocusOut: true,
-                placeHolder: 'My Awesome Project'
-            });
-            if (projectName) {
-                await SettingsManager.updateSetting('projectName', projectName);
-            }
-        }
-        return projectName;
-    };
-
-    const getWatchLocation = async (): Promise<vscode.Uri | undefined> => {
+    const getWatchLocation = async (promptForSync: boolean = true): Promise<vscode.Uri | undefined> => {
         let settings = await SettingsManager.loadSettings();
         let watchPath = settings.watchLocation;
 
@@ -105,11 +91,186 @@ export async function activate(context: vscode.ExtensionContext) {
             });
 
             if (folderResult && folderResult.length > 0) {
-                watchPath = folderResult[0].fsPath;
+                // Convert absolute path to relative path from workspace root
+                const selectedPath = folderResult[0].fsPath;
+                if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                    const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                    if (selectedPath.startsWith(workspaceRoot)) {
+                        watchPath = path.relative(workspaceRoot, selectedPath);
+                        // Normalize path separators to forward slashes
+                        watchPath = watchPath.split(path.sep).join('/');
+                    } else {
+                        // If selected path is outside workspace, store as absolute (fallback)
+                        watchPath = selectedPath;
+                    }
+                } else {
+                    // No workspace folder, store as absolute (fallback)
+                    watchPath = selectedPath;
+                }
                 await SettingsManager.updateSetting('watchLocation', watchPath);
+                
+                // Check if all settings are complete and prompt for sync (if not called from getProjectName)
+                if (promptForSync) {
+                    await checkAndPromptSync();
+                }
             }
         }
-        return watchPath ? vscode.Uri.file(watchPath) : undefined;
+        
+        // Convert relative path back to absolute path
+        if (watchPath) {
+            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                // Check if it's already an absolute path (backward compatibility)
+                if (path.isAbsolute(watchPath)) {
+                    return vscode.Uri.file(watchPath);
+                } else {
+                    // It's a relative path, join with workspace root
+                    const absolutePath = path.join(workspaceRoot, watchPath);
+                    return vscode.Uri.file(absolutePath);
+                }
+            } else {
+                // No workspace folder, assume it's absolute (backward compatibility)
+                return vscode.Uri.file(watchPath);
+            }
+        }
+        return undefined;
+    };
+
+    const checkAndPromptSync = async (): Promise<void> => {
+        const apiKey = await context.secrets.get('geminiApiKey');
+        const settings = await SettingsManager.loadSettings();
+        const allSettingsComplete = apiKey && settings.projectName && settings.watchLocation;
+
+        if (allSettingsComplete) {
+            const selection = await vscode.window.showInformationMessage(
+                `All settings are configured. Would you like to sync documents now?`,
+                'Sync Now',
+                'Later'
+            );
+
+            if (selection === 'Sync Now') {
+                // Defer command execution to ensure the command is registered
+                // This is needed because checkAndPromptSync can be called during startup
+                // before all commands are registered
+                setTimeout(async () => {
+                    try {
+                        await vscode.commands.executeCommand('geminiFileSearch.sync');
+                    } catch (error: any) {
+                        // If command execution fails, show a helpful message
+                        vscode.window.showErrorMessage(`Failed to start sync: ${error?.message || error || 'Unknown error'}`);
+                    }
+                }, 100);
+            }
+        }
+    };
+
+    const getProjectName = async (): Promise<string | undefined> => {
+        let settings = await SettingsManager.loadSettings();
+        let projectName = settings.projectName;
+
+        if (!projectName) {
+            // Get existing projects from Gemini API
+            let existingProjects: string[] = [];
+            try {
+                const apiKey = await context.secrets.get('geminiApiKey');
+                if (apiKey) {
+                    const geminiService = new GeminiService(apiKey);
+                    existingProjects = await geminiService.listFileStores();
+                }
+            } catch (error) {
+                console.warn('Failed to fetch existing projects:', error);
+            }
+
+            // If there are existing projects, show QuickPick with autocomplete
+            if (existingProjects.length > 0) {
+                const quickPick = vscode.window.createQuickPick();
+                quickPick.placeholder = 'Type to search existing projects or create a new one...';
+                quickPick.items = [
+                    { label: '$(add) Create new project...', description: 'Enter a new project name', alwaysShow: true },
+                    ...existingProjects.map(name => ({ label: name }))
+                ];
+                quickPick.canSelectMany = false;
+
+                // Show the QuickPick and wait for selection
+                const selected = await new Promise<{ item: vscode.QuickPickItem | undefined; typedValue: string }>((resolve) => {
+                    let finalTypedValue = '';
+                    quickPick.onDidChangeValue((value) => {
+                        finalTypedValue = value;
+                    });
+
+                    quickPick.onDidAccept(() => {
+                        const selectedItem = quickPick.selectedItems[0];
+                        const currentValue = quickPick.value || finalTypedValue;
+                        
+                        if (selectedItem) {
+                            resolve({ item: selectedItem, typedValue: currentValue });
+                        } else if (currentValue && !existingProjects.includes(currentValue)) {
+                            // User typed something new that doesn't match any project, use it directly
+                            resolve({ item: { label: currentValue } as vscode.QuickPickItem, typedValue: currentValue });
+                        } else {
+                            resolve({ item: undefined, typedValue: currentValue });
+                        }
+                        quickPick.dispose();
+                    });
+                    quickPick.onDidHide(() => {
+                        resolve({ item: undefined, typedValue: '' });
+                        quickPick.dispose();
+                    });
+                    quickPick.show();
+                });
+
+                if (selected.item) {
+                    if (selected.item.label === '$(add) Create new project...') {
+                        // If user typed a value, use it directly (after validation)
+                        const typedValue = selected.typedValue.trim();
+                        if (typedValue && typedValue.length > 0 && !existingProjects.includes(typedValue)) {
+                            projectName = typedValue;
+                        } else {
+                            // Show input box for new project name (pre-fill with typed value if available)
+                            projectName = await vscode.window.showInputBox({
+                                prompt: 'Enter a Project Name for Gemini File Sync',
+                                ignoreFocusOut: true,
+                                placeHolder: 'My Awesome Project',
+                                value: typedValue || undefined,
+                                validateInput: (value) => {
+                                    if (!value || value.trim().length === 0) {
+                                        return 'Project name cannot be empty';
+                                    }
+                                    if (existingProjects.includes(value.trim())) {
+                                        return 'A project with this name already exists';
+                                    }
+                                    return null;
+                                }
+                            });
+                        }
+                    } else {
+                        // Use selected existing project or typed new project name
+                        projectName = selected.item.label;
+                    }
+                }
+            } else {
+                // No existing projects, just show input box
+                projectName = await vscode.window.showInputBox({
+                    prompt: 'Enter a Project Name for Gemini File Sync',
+                    ignoreFocusOut: true,
+                    placeHolder: 'My Awesome Project'
+                });
+            }
+
+            if (projectName) {
+                await SettingsManager.updateSetting('projectName', projectName);
+                
+                // Automatically prompt for watch location if not set
+                const updatedSettings = await SettingsManager.loadSettings();
+                if (!updatedSettings.watchLocation) {
+                    await getWatchLocation(false); // Don't prompt for sync here, we'll do it after
+                }
+                
+                // Check if all settings are complete and prompt for sync
+                await checkAndPromptSync();
+            }
+        }
+        return projectName;
     };
 
     // --- Startup Logic ---
@@ -125,7 +286,13 @@ export async function activate(context: vscode.ExtensionContext) {
 
     const watchUri = await getWatchLocation();
     if (watchUri) {
-        outputChannel.appendLine(`Watching Location: ${watchUri.fsPath}`);
+        const settings = await SettingsManager.loadSettings();
+        const watchPath = settings.watchLocation || watchUri.fsPath;
+        // Display relative path if available, otherwise absolute
+        const displayPath = (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0 && !path.isAbsolute(watchPath))
+            ? watchPath
+            : vscode.workspace.asRelativePath(watchUri);
+        outputChannel.appendLine(`Watching Location: ${displayPath}`);
     }
 
     // --- File Tracking Helpers ---
@@ -153,11 +320,72 @@ export async function activate(context: vscode.ExtensionContext) {
         await context.workspaceState.update(key, obj);
     };
 
+    // --- Helper to check if sync is enabled ---
+    const isSyncEnabled = async (): Promise<boolean> => {
+        try {
+            const settings = await SettingsManager.loadSettings();
+            // Default to true if not set
+            return settings.syncEnabled !== false;
+        } catch (error) {
+            // If there's an error reading settings, default to enabled
+            console.warn('Failed to check sync enabled setting:', error);
+            return true;
+        }
+    };
+
     // --- File Watcher ---
     let watcher: vscode.FileSystemWatcher | undefined;
-    if (watchUri) {
-        // Create a relative pattern if possible, or just watch the path
-        const pattern = new vscode.RelativePattern(watchUri, '**/*');
+    let currentWatchUri: vscode.Uri | undefined = watchUri;
+
+    const setupFileWatcher = (watchUri: vscode.Uri | undefined) => {
+        // Dispose existing watcher if any
+        if (watcher) {
+            watcher.dispose();
+            watcher = undefined;
+        }
+
+        if (!watchUri) {
+            return;
+        }
+
+        currentWatchUri = watchUri;
+
+        // Create a pattern for the file watcher
+        // RelativePattern requires a WorkspaceFolder, not a Uri
+        let pattern: vscode.GlobPattern;
+        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+            const workspaceFolder = vscode.workspace.workspaceFolders[0];
+            const workspaceRoot = workspaceFolder.uri.fsPath;
+            const watchPath = watchUri.fsPath;
+            
+            // Check if watch location is within workspace
+            if (watchPath.startsWith(workspaceRoot)) {
+                // Use relative pattern for paths within workspace
+                const relativePath = path.relative(workspaceRoot, watchPath);
+                // Normalize the relative path and create pattern
+                let normalizedRelative: string;
+                if (!relativePath || relativePath === '.' || relativePath === '') {
+                    normalizedRelative = '**/*';
+                } else {
+                    // Remove leading/trailing slashes and normalize separators
+                    const cleanPath = relativePath.replace(/^[/\\]+|[/\\]+$/g, '').replace(/\\/g, '/');
+                    normalizedRelative = `${cleanPath}/**/*`;
+                }
+                pattern = new vscode.RelativePattern(workspaceFolder, normalizedRelative);
+                outputChannel.appendLine(`File watcher: Using relative pattern for ${normalizedRelative} (watching: ${watchPath})`);
+            } else {
+                // For paths outside workspace, use absolute glob pattern
+                const normalizedPath = watchPath.replace(/\\/g, '/').replace(/\/+$/, '');
+                pattern = `${normalizedPath}/**/*`;
+                outputChannel.appendLine(`File watcher: Using absolute pattern for ${pattern}`);
+            }
+        } else {
+            // No workspace folder, use absolute glob pattern
+            const normalizedPath = watchUri.fsPath.replace(/\\/g, '/').replace(/\/+$/, '');
+            pattern = `${normalizedPath}/**/*`;
+            outputChannel.appendLine(`File watcher: Using absolute pattern (no workspace) for ${pattern}`);
+        }
+        
         watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
         const onFileChange = async (uri: vscode.Uri) => {
@@ -171,9 +399,15 @@ export async function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            // Check if sync is enabled (must be checked first)
+            if (!(await isSyncEnabled())) {
+                return;
+            }
+
             const settings = await SettingsManager.loadSettings();
             const currentProjectName = settings.projectName || 'Project';
 
+            outputChannel.appendLine(`File change detected: ${uri.fsPath}`);
             const selection = await vscode.window.showInformationMessage(
                 `File changes detected in ${currentProjectName}.`,
                 'Sync Now'
@@ -195,13 +429,18 @@ export async function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
+            // Check if sync is enabled (must be checked first)
+            if (!(await isSyncEnabled())) {
+                return;
+            }
+
             const settings = await SettingsManager.loadSettings();
             const currentProjectName = settings.projectName || 'Project';
             
             // Calculate relative path from watch location or workspace
             let relativePath: string;
-            if (watchUri) {
-                const watchPath = watchUri.fsPath;
+            if (currentWatchUri) {
+                const watchPath = currentWatchUri.fsPath;
                 const filePath = uri.fsPath;
                 if (filePath.startsWith(watchPath)) {
                     relativePath = path.relative(watchPath, filePath);
@@ -219,21 +458,30 @@ export async function activate(context: vscode.ExtensionContext) {
             const trackedFile = fileMetadata.get(relativePath);
 
             if (trackedFile && trackedFile.documentName) {
-                try {
-                    const apiKey = await context.secrets.get('geminiApiKey');
-                    if (apiKey) {
-                        const geminiService = new GeminiService(apiKey);
-                        outputChannel.appendLine(`Deleting ${relativePath} from store...`);
-                        await geminiService.deleteDocument(trackedFile.documentName);
-                        fileMetadata.delete(relativePath);
-                        await saveFileMetadata(currentProjectName, fileMetadata);
-                        outputChannel.appendLine(`Deleted ${relativePath} from store.`);
-                        vscode.window.showInformationMessage(`Deleted ${relativePath} from store.`);
+                // Ask user for permission to delete from store
+                const selection = await vscode.window.showInformationMessage(
+                    `File ${relativePath} was deleted. Do you want to remove it from the store?`,
+                    'Delete from Store',
+                    'Cancel'
+                );
+
+                if (selection === 'Delete from Store') {
+                    try {
+                        const apiKey = await context.secrets.get('geminiApiKey');
+                        if (apiKey) {
+                            const geminiService = new GeminiService(apiKey);
+                            outputChannel.appendLine(`Deleting ${relativePath} from store...`);
+                            await geminiService.deleteDocument(trackedFile.documentName);
+                            fileMetadata.delete(relativePath);
+                            await saveFileMetadata(currentProjectName, fileMetadata);
+                            outputChannel.appendLine(`Deleted ${relativePath} from store.`);
+                            vscode.window.showInformationMessage(`Deleted ${relativePath} from store.`);
+                        }
+                    } catch (error) {
+                        const errorMsg = `Failed to delete ${relativePath} from store: ${error}`;
+                        outputChannel.appendLine(errorMsg);
+                        vscode.window.showWarningMessage(errorMsg);
                     }
-                } catch (error) {
-                    const errorMsg = `Failed to delete ${relativePath} from store: ${error}`;
-                    outputChannel.appendLine(errorMsg);
-                    vscode.window.showWarningMessage(errorMsg);
                 }
             }
         };
@@ -241,6 +489,25 @@ export async function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(watcher.onDidChange(onFileChange));
         context.subscriptions.push(watcher.onDidCreate(onFileChange));
         context.subscriptions.push(watcher.onDidDelete(onFileDelete));
+        outputChannel.appendLine(`File watcher initialized for ${watchUri.fsPath}`);
+    };
+
+    // Initialize watcher
+    setupFileWatcher(watchUri);
+
+    // Watch for changes to document-sync.json to detect syncEnabled changes
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        const settingsPath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'document-sync.json');
+        const settingsWatcher = vscode.workspace.createFileSystemWatcher(settingsPath);
+        
+        settingsWatcher.onDidChange(async () => {
+            // When settings file changes, check syncEnabled and log status
+            const enabled = await isSyncEnabled();
+            outputChannel.appendLine(`Sync ${enabled ? 'enabled' : 'disabled'} (detected from document-sync.json change)`);
+            treeDataProvider.refresh(); // Refresh tree view to update toggle button
+        });
+        
+        context.subscriptions.push(settingsWatcher);
     }
 
 
@@ -286,7 +553,17 @@ export async function activate(context: vscode.ExtensionContext) {
             updateApiKeyItem.command = { command: 'geminiFileSearch.updateApiKey', title: "Update API Key" };
             updateApiKeyItem.iconPath = new vscode.ThemeIcon('key');
 
-            return [syncItem, projectItem, watchItem, updateApiKeyItem];
+            // Add toggle sync item
+            const settings = await SettingsManager.loadSettings();
+            const syncEnabled = settings.syncEnabled !== false; // Default to true
+            const toggleSyncItem = new vscode.TreeItem(
+                syncEnabled ? "Disable Sync" : "Enable Sync",
+                vscode.TreeItemCollapsibleState.None
+            );
+            toggleSyncItem.command = { command: 'geminiFileSearch.toggleSync', title: syncEnabled ? "Disable Sync" : "Enable Sync" };
+            toggleSyncItem.iconPath = new vscode.ThemeIcon(syncEnabled ? 'circle-slash' : 'check');
+
+            return [syncItem, projectItem, watchItem, updateApiKeyItem, toggleSyncItem];
         }
     }
 
@@ -304,13 +581,30 @@ export async function activate(context: vscode.ExtensionContext) {
         await SettingsManager.updateSetting('projectName', undefined); // Clear to force prompt
         await getProjectName();
         treeDataProvider.refresh();
+        // checkAndPromptSync is already called in getProjectName
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.changeWatchLocation', async () => {
-        await SettingsManager.updateSetting('watchLocation', undefined); // Clear to force prompt
-        await getWatchLocation();
-        vscode.window.showInformationMessage("Watch location updated. Reload window to apply watcher changes fully.");
+        // Save current watch location to restore if user cancels
+        const currentSettings = await SettingsManager.loadSettings();
+        const oldWatchLocation = currentSettings.watchLocation;
+        
+        // Temporarily clear to force getWatchLocation() to prompt
+        await SettingsManager.updateSetting('watchLocation', undefined);
+        
+        const watchUri = await getWatchLocation();
+        if (watchUri) {
+            // User selected a new location - it's already saved by getWatchLocation()
+            setupFileWatcher(watchUri);
+            vscode.window.showInformationMessage("Watch location updated. File watcher is now active.");
+        } else {
+            // User cancelled - restore the old location
+            if (oldWatchLocation) {
+                await SettingsManager.updateSetting('watchLocation', oldWatchLocation);
+            }
+        }
         treeDataProvider.refresh();
+        // checkAndPromptSync is already called in getWatchLocation
     }));
 
     context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.updateApiKey', async () => {
@@ -323,10 +617,34 @@ export async function activate(context: vscode.ExtensionContext) {
             await context.secrets.store('geminiApiKey', newApiKey);
             vscode.window.showInformationMessage('API Key updated successfully.');
             treeDataProvider.refresh();
+            // Check if all settings are complete and prompt for sync
+            await checkAndPromptSync();
         }
     }));
 
+    context.subscriptions.push(vscode.commands.registerCommand('geminiFileSearch.toggleSync', async () => {
+        const settings = await SettingsManager.loadSettings();
+        const currentSyncEnabled = settings.syncEnabled !== false; // Default to true
+        const newSyncEnabled = !currentSyncEnabled;
+        
+        await SettingsManager.updateSetting('syncEnabled', newSyncEnabled);
+        
+        const message = newSyncEnabled 
+            ? 'Sync enabled for this project.' 
+            : 'Sync disabled for this project. File watcher will ignore changes.';
+        vscode.window.showInformationMessage(message);
+        outputChannel.appendLine(`Sync ${newSyncEnabled ? 'enabled' : 'disabled'} for this project.`);
+        treeDataProvider.refresh();
+    }));
+
     let disposable = vscode.commands.registerCommand('geminiFileSearch.sync', async () => {
+        // Check if sync is enabled
+        const settings = await SettingsManager.loadSettings();
+        if (settings.syncEnabled === false) {
+            vscode.window.showWarningMessage('Sync is disabled for this project. Enable it using "Toggle Sync" command or set syncEnabled to true in document-sync.json.');
+            return;
+        }
+
         outputChannel.show();
         outputChannel.appendLine('Starting sync process...');
 
@@ -344,11 +662,24 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // 2. Determine Folder to Sync (Use Watch Location if available, else prompt)
         let folderUri: vscode.Uri | undefined;
-        const settings = await SettingsManager.loadSettings();
         const storedWatchPath = settings.watchLocation;
 
         if (storedWatchPath) {
-            folderUri = vscode.Uri.file(storedWatchPath);
+            // Convert relative path back to absolute path
+            if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+                const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+                // Check if it's already an absolute path (backward compatibility)
+                if (path.isAbsolute(storedWatchPath)) {
+                    folderUri = vscode.Uri.file(storedWatchPath);
+                } else {
+                    // It's a relative path, join with workspace root
+                    const absolutePath = path.join(workspaceRoot, storedWatchPath);
+                    folderUri = vscode.Uri.file(absolutePath);
+                }
+            } else {
+                // No workspace folder, assume it's absolute (backward compatibility)
+                folderUri = vscode.Uri.file(storedWatchPath);
+            }
         } else {
             const folderResult = await vscode.window.showOpenDialog({
                 canSelectFiles: false,
@@ -452,18 +783,12 @@ export async function activate(context: vscode.ExtensionContext) {
                 }
             }
 
-            // Determine files to delete from store (no longer exist locally)
-            const filesToDelete: Array<{ displayName: string; documentName: string }> = [];
-            for (const [displayName, documentName] of storeDocumentsByDisplayName) {
-                if (!localFilesByPath.has(displayName)) {
-                    filesToDelete.push({ displayName, documentName });
-                }
-            }
+            // Note: Files are not automatically deleted during sync.
+            // Deletions only happen when the file watcher detects a file deletion and user confirms.
 
             outputChannel.appendLine(`Files to upload: ${filesToUpload.length}`);
-            outputChannel.appendLine(`Files to delete: ${filesToDelete.length}`);
 
-            const totalOperations = filesToUpload.length + filesToDelete.length;
+            const totalOperations = filesToUpload.length;
             let completedOperations = 0;
 
             await vscode.window.withProgress({
@@ -471,30 +796,6 @@ export async function activate(context: vscode.ExtensionContext) {
                 title: "Syncing files to Gemini",
                 cancellable: true
             }, async (progress, token) => {
-                // Delete files that no longer exist locally
-                for (const { displayName, documentName } of filesToDelete) {
-                    if (token.isCancellationRequested) {
-                        outputChannel.appendLine('Sync cancelled by user.');
-                        break;
-                    }
-
-                    progress.report({ 
-                        message: `Deleting ${displayName}...`, 
-                        increment: totalOperations > 0 ? 100 / totalOperations : 0 
-                    });
-                    outputChannel.appendLine(`Deleting ${displayName}...`);
-
-                    try {
-                        await geminiService.deleteDocument(documentName);
-                        fileMetadata.delete(displayName);
-                        outputChannel.appendLine(`Deleted ${displayName}`);
-                        completedOperations++;
-                    } catch (err) {
-                        const errorMsg = `Failed to delete ${displayName}: ${err}`;
-                        console.error(errorMsg);
-                        outputChannel.appendLine(errorMsg);
-                    }
-                }
 
                 // Upload new or changed files
                 for (const { uri, relativePath, mtime } of filesToUpload) {
@@ -565,7 +866,7 @@ export async function activate(context: vscode.ExtensionContext) {
                 outputChannel.appendLine(`Saved metadata for ${fileMetadata.size} files`);
             });
 
-            const summary = `Sync complete. Uploaded ${filesToUpload.length} file(s), deleted ${filesToDelete.length} file(s).`;
+            const summary = `Sync complete. Uploaded ${filesToUpload.length} file(s).`;
             vscode.window.showInformationMessage(summary);
             outputChannel.appendLine(summary);
 

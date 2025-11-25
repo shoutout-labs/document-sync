@@ -12,5 +12,8 @@
     },
     "include": [
         "src/**/*"
+    ],
+    "exclude": [
+        "src/upload_test_file.ts"
     ]
 }
