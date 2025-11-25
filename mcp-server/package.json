@@ -1,6 +1,6 @@
 {
     "name": "@shoutoutlabs/document-sync-mcp",
-    "version": "0.1.12",
+    "version": "0.1.13",
     "description": "MCP Server for Gemini File Search",
     "type": "module",
     "main": "build/index.js",
