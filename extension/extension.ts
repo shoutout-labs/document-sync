@@ -335,9 +335,57 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // --- File Watcher ---
     let watcher: vscode.FileSystemWatcher | undefined;
-    if (watchUri) {
-        // Create a relative pattern if possible, or just watch the path
-        const pattern = new vscode.RelativePattern(watchUri, '**/*');
+    let currentWatchUri: vscode.Uri | undefined = watchUri;
+
+    const setupFileWatcher = (watchUri: vscode.Uri | undefined) => {
+        // Dispose existing watcher if any
+        if (watcher) {
+            watcher.dispose();
+            watcher = undefined;
+        }
+
+        if (!watchUri) {
+            return;
+        }
+
+        currentWatchUri = watchUri;
+
+        // Create a pattern for the file watcher
+        // RelativePattern requires a WorkspaceFolder, not a Uri
+        let pattern: vscode.GlobPattern;
+        if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+            const workspaceFolder = vscode.workspace.workspaceFolders[0];
+            const workspaceRoot = workspaceFolder.uri.fsPath;
+            const watchPath = watchUri.fsPath;
+            
+            // Check if watch location is within workspace
+            if (watchPath.startsWith(workspaceRoot)) {
+                // Use relative pattern for paths within workspace
+                const relativePath = path.relative(workspaceRoot, watchPath);
+                // Normalize the relative path and create pattern
+                let normalizedRelative: string;
+                if (!relativePath || relativePath === '.' || relativePath === '') {
+                    normalizedRelative = '**/*';
+                } else {
+                    // Remove leading/trailing slashes and normalize separators
+                    const cleanPath = relativePath.replace(/^[/\\]+|[/\\]+$/g, '').replace(/\\/g, '/');
+                    normalizedRelative = `${cleanPath}/**/*`;
+                }
+                pattern = new vscode.RelativePattern(workspaceFolder, normalizedRelative);
+                outputChannel.appendLine(`File watcher: Using relative pattern for ${normalizedRelative} (watching: ${watchPath})`);
+            } else {
+                // For paths outside workspace, use absolute glob pattern
+                const normalizedPath = watchPath.replace(/\\/g, '/').replace(/\/+$/, '');
+                pattern = `${normalizedPath}/**/*`;
+                outputChannel.appendLine(`File watcher: Using absolute pattern for ${pattern}`);
+            }
+        } else {
+            // No workspace folder, use absolute glob pattern
+            const normalizedPath = watchUri.fsPath.replace(/\\/g, '/').replace(/\/+$/, '');
+            pattern = `${normalizedPath}/**/*`;
+            outputChannel.appendLine(`File watcher: Using absolute pattern (no workspace) for ${pattern}`);
+        }
+        
         watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
         const onFileChange = async (uri: vscode.Uri) => {
@@ -359,6 +407,7 @@ export async function activate(context: vscode.ExtensionContext) {
             const settings = await SettingsManager.loadSettings();
             const currentProjectName = settings.projectName || 'Project';
 
+            outputChannel.appendLine(`File change detected: ${uri.fsPath}`);
             const selection = await vscode.window.showInformationMessage(
                 `File changes detected in ${currentProjectName}.`,
                 'Sync Now'
@@ -390,8 +439,8 @@ export async function activate(context: vscode.ExtensionContext) {
             
             // Calculate relative path from watch location or workspace
             let relativePath: string;
-            if (watchUri) {
-                const watchPath = watchUri.fsPath;
+            if (currentWatchUri) {
+                const watchPath = currentWatchUri.fsPath;
                 const filePath = uri.fsPath;
                 if (filePath.startsWith(watchPath)) {
                     relativePath = path.relative(watchPath, filePath);
@@ -440,7 +489,11 @@ export async function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(watcher.onDidChange(onFileChange));
         context.subscriptions.push(watcher.onDidCreate(onFileChange));
         context.subscriptions.push(watcher.onDidDelete(onFileDelete));
-    }
+        outputChannel.appendLine(`File watcher initialized for ${watchUri.fsPath}`);
+    };
+
+    // Initialize watcher
+    setupFileWatcher(watchUri);
 
     // Watch for changes to document-sync.json to detect syncEnabled changes
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
@@ -542,7 +595,8 @@ export async function activate(context: vscode.ExtensionContext) {
         const watchUri = await getWatchLocation();
         if (watchUri) {
             // User selected a new location - it's already saved by getWatchLocation()
-            vscode.window.showInformationMessage("Watch location updated. Reload window to apply watcher changes fully.");
+            setupFileWatcher(watchUri);
+            vscode.window.showInformationMessage("Watch location updated. File watcher is now active.");
         } else {
             // User cancelled - restore the old location
             if (oldWatchLocation) {

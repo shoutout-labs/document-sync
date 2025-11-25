@@ -230,11 +230,35 @@ Once configured, you can ask AI agents questions like:
 
 The AI agent will use the MCP server to query your synced files and provide accurate answers based on your actual codebase.
 
+## Web Client
+
+The application also includes a **web-client** that can run on your own server. This provides a powerful web interface to manage and interact with your synced documents and projects.
+
+### Features
+
+- **View Synced Documents**: All documents and projects synced via the extension can be viewed in the web interface
+- **Project Management**: Manage your projects, knowledge bases, and documents through an intuitive web dashboard
+- **Team Collaboration**: Provide access to your dashboard for other teams (marketing, sales, etc.) so they have up-to-date documentation to retrieve information
+- **MCP Server Integration**: With the MCP server, you can get relevant application context directly in the chat interface
+- **Multi-Repository Support**: Ideal for managing multiple repositories for the same project (such as microservices), providing the same knowledge base across all repos
+
+### Advantages
+
+- **Team Access**: Share your documentation dashboard with non-technical team members who need access to up-to-date project information
+- **Context-Aware Chat**: The web client integrates with the MCP server to provide relevant application context during chat interactions
+- **Unified Knowledge Base**: Perfect for microservices architectures where you want a single knowledge base accessible across multiple repositories
+
+### Running the Web Client
+
+See the [web-client README](../web-client/README.md) for detailed setup instructions. The web client can be configured to use your Gemini API key via environment variable or entered directly in the interface.
+
+> **Important:** To see the same projects across the extension, MCP server, and web client, you must use the **same Gemini API key** in all three components. Each API key has its own set of File Search stores, so using different keys will show different projects.
+
 ## Related Tools
 
 This extension works great with:
 - **MCP Server**: Use `@shoutoutlabs/document-sync-mcp` to enable AI agents to query your files via Model Context Protocol
-- **Web Client**: Chat with your project files through a web interface
+- **Web Client**: Chat with your project files through a web interface and manage your knowledge bases
 
 ## Support
 
