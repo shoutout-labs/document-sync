@@ -4,6 +4,13 @@ This is a Model Context Protocol (MCP) server that allows AI agents to query you
 
 It automatically detects your project configuration from the `document-sync.json` file created by the Gemini File Sync VS Code extension.
 
+### Demo
+
+<video width="100%" controls>
+  <source src="../resources/Document_Sync__Living_Brain.mp4" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 ## Related Extensions
 
 This MCP server works seamlessly with the **Document Sync** extension for VS Code and Cursor, which automatically syncs your project files to Google's Gemini File Search API.
