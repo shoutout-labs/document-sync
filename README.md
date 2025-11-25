@@ -16,6 +16,7 @@ Document Sync consists of three main components:
   <source src="resources/Document_Sync__Living_Brain.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
+Direct link: [resources/Document_Sync__Living_Brain.mp4](resources/Document_Sync__Living_Brain.mp4)
 
 ## Features
 
@@ -275,4 +276,3 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## Support
 
 For issues and questions, please open an issue on the GitHub repository.
-
