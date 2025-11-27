@@ -113,6 +113,7 @@ To use this server with Claude Desktop, add the following to your `claude_deskto
 - **`ask_project(query: string, projectName?: string)`**: Ask a question about the current project.
     - `query`: The question to ask.
     - `projectName`: (Optional) The name of the project. If provided, the server uses this name to find files. If not provided, it attempts to find `document-sync.json` in the current or parent directories.
+- **`list_projects()`**: List all available Gemini File Search projects (File Search stores) accessible with the current `GEMINI_API_KEY`.
 
 ## Web Client
 

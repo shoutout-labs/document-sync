@@ -5,7 +5,7 @@ import {
     CallToolRequestSchema,
     ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { askProject, getProjectName } from "./gemini.js";
+import { askProject, listProjects } from "./gemini.js";
 
 // --- Server Setup ---
 const server = new Server(
@@ -43,6 +43,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     required: ["query"],
                 },
             },
+            {
+                name: "list_projects",
+                description:
+                    "List all available Gemini File Search projects (File Search stores) for the current GEMINI_API_KEY.",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                },
+            },
         ],
     };
 });
@@ -68,6 +77,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     {
                         type: "text",
                         text: error.message,
+                    },
+                ],
+                isError: true,
+            };
+        }
+    }
+
+    if (request.params.name === "list_projects") {
+        try {
+            const projects = await listProjects();
+            if (projects.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: "text",
+                            text: "No projects found for the current GEMINI_API_KEY.",
+                        },
+                    ],
+                };
+            }
+
+            const projectList = projects.map((project) => `- ${project}`).join("\n");
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Available projects:\n${projectList}`,
+                    },
+                ],
+            };
+        } catch (error: any) {
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: error.message ?? "Unexpected error listing projects.",
                     },
                 ],
                 isError: true,
